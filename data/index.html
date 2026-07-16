@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RehabDevice — Система мониторинга реабилитации кисти</title>
+    <!-- Подключение шрифта Inter и библиотеки Chart.js -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="logo-area">
+            <div class="logo-icon">RD</div>
+            <div class="logo-text">
+                <h1>RehabDevice</h1>
+                <span>Medical Motion Tracker</span>
+            </div>
+        </div>
+        <div class="header-controls">
+            <div class="connection-badge">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Подключение...</span>
+            </div>
+            <div class="memory-widget">
+                <div class="memory-label">
+                    <span>Память (LittleFS)</span>
+                    <span id="memoryText">---</span>
+                </div>
+                <div class="memory-progress">
+                    <div class="memory-bar" id="memoryBar" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Навигация по вкладкам -->
+        <nav class="tabs-nav">
+            <button class="tab-btn active" data-tab="tabPatient">
+                <span>🧘 Тренировка и Мониторинг</span>
+            </button>
+            <button class="tab-btn" data-tab="tabDoctor">
+                <span>🩺 Интерфейс Врача (Статистика)</span>
+            </button>
+        </nav>
+
+        <!-- Вкладка 1: Пациент и реальный режим -->
+        <section class="tab-content active" id="tabPatient">
+            <div class="grid-2">
+                <!-- Левая колонка: Панель управления и авторизации -->
+                <div class="card auth-panel">
+                    <div class="card-header">
+                        <div class="card-title">🔐 Авторизация Сессии</div>
+                    </div>
+
+                    <!-- Панель гостя (до авторизации) -->
+                    <div id="authGuestPanel" style="display: flex; flex-direction: column; gap: 1rem;">
+                        <div class="input-group">
+                            <label for="patientIdInput">ФИО / ID Пациента</label>
+                            <input type="text" id="patientIdInput" class="input-field" placeholder="Например: Иван Петров" autocomplete="off">
+                        </div>
+                        <button class="btn" id="btnStartSession">🚀 Начать сессию</button>
+                        <p style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">
+                            ℹ️ Визуализация угла поворота (круг) работает всегда, даже в гостевом режиме без авторизации. При авторизации включается сбор расширенной аналитики и сохранение в память.
+                        </p>
+                    </div>
+
+                    <!-- Панель активного пациента -->
+                    <div id="authActivePanel" style="display: none; flex-direction: column; gap: 1rem;">
+                        <div style="padding: 1rem; background: rgba(0, 230, 118, 0.1); border: 1px solid rgba(0, 230, 118, 0.3); border-radius: 12px;">
+                            <span style="font-size: 0.8rem; color: var(--text-secondary);">Активная сессия пациента:</span>
+                            <h3 id="activePatientName" style="font-size: 1.25rem; color: var(--accent-green); margin-top: 0.25rem;">Пациент</h3>
+                        </div>
+                        <button class="btn btn-danger" id="btnStopSession">⏹️ Завершить сессию и сохранить</button>
+                    </div>
+
+                    <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 0.5rem 0;">
+
+                    <!-- Калибровка датчика -->
+                    <div class="input-group">
+                        <label>Мгновенная калибровка нулевой позиции</label>
+                        <button class="btn btn-secondary" id="btnRecalibrate">🎯 Рекалибровка 0° на лету</button>
+                    </div>
+                </div>
+
+                <!-- Правая колонка: Интерактивный круг (Угол наклона) -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">🔄 Динамическая визуализация угла кисти</div>
+                    </div>
+                    <div class="visualizer-container">
+                        <div class="circle-wrapper">
+                            <div class="circle-background"></div>
+                            <div class="circle-indicator" id="circleIndicator">
+                                <div class="circle-crosshair"></div>
+                                <div class="circle-crosshair vert"></div>
+                                <div class="circle-pointer"></div>
+                            </div>
+                        </div>
+                        <div class="angle-display">
+                            <div class="angle-value"><span id="angleValueElem">0.0</span>°</div>
+                            <div class="angle-unit">Текущий угол поворота</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Живая аналитика (отображается только при авторизации пациента) -->
+            <div class="card" id="liveStatsPanel" style="display: none;">
+                <div class="card-header">
+                    <div class="card-title">📊 Расширенная аналитика в реальном времени</div>
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-box">
+                        <span class="metric-title">Мин / Макс Угол</span>
+                        <span class="metric-val"><span id="statMin">0.0°</span> / <span id="statMax">0.0°</span></span>
+                    </div>
+                    <div class="metric-box highlight">
+                        <span class="metric-title">Амплитуда движения</span>
+                        <span class="metric-val" id="statAmp">0.0°</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-title">Ср. скорость</span>
+                        <span class="metric-val" id="statSpeed">0.0°/с</span>
+                    </div>
+                    <div class="metric-box highlight">
+                        <span class="metric-title">Индекс плавности (тремор)</span>
+                        <span class="metric-val" id="statSmooth" style="color: var(--accent-green);">100%</span>
+                    </div>
+                    <div class="metric-box highlight">
+                        <span class="metric-title">Сгибания / Повороты</span>
+                        <span class="metric-val" id="statFlex" style="color: var(--accent-orange);">0</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-title">Время удержания в краях</span>
+                        <span class="metric-val" id="statHold">0.0 с</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка 2: Интерфейс Врача -->
+        <section class="tab-content" id="tabDoctor">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">🩺 Аналитический дашборд пациентов</div>
+                    <button class="btn" id="btnDownloadCSV" style="padding: 0.65rem 1.25rem;">
+                        📥 Скачать данные (CSV)
+                    </button>
+                </div>
+                
+                <div class="chart-wrapper">
+                    <canvas id="doctorChartCanvas"></canvas>
+                </div>
+
+                <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 2rem 0;">
+
+                <div class="card-title" style="margin-bottom: 1rem;">📋 История сохраненных сессий (LittleFS)</div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Пациент</th>
+                                <th>Дата и Время</th>
+                                <th>Мин / Макс Угол</th>
+                                <th>Амплитуда</th>
+                                <th>Ср. Скорость</th>
+                                <th>Плавность</th>
+                                <th>Сгибания</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sessionsTableBody">
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: var(--text-secondary);">Загрузка данных...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
