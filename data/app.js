@@ -249,13 +249,18 @@ function initChart() {
 // Отрисовка таблицы и графика для врача
 function renderDoctorSessions(sessions) {
     const tbody = document.getElementById("sessionsTableBody");
+    const chartWrap = document.querySelector(".chart-wrapper");
     if (!tbody) return;
     tbody.innerHTML = "";
 
     if (sessions.length === 0) {
-        tbody.innerHTML = "<tr><td colspan='7' style='text-align:center; color:#64748b;'>Сохраненные сессии отсутствуют</td></tr>";
+        // Убираем горизонтальный скролл при пустой таблице и делаем аккуратную заглушку
+        tbody.innerHTML = `<tr><td colspan='7' style='text-align:center; padding: 2.5rem 1rem; color: var(--text-secondary); background: rgba(0,0,0,0.15); border-radius: 8px;'>📭 Сохраненные сессии пока отсутствуют.<br><span style='font-size:0.8rem; color: var(--text-muted);'>Проведите тренировку во вкладке пациента и завершите сессию, чтобы данные появились здесь.</span></td></tr>`;
+        if (chartWrap) chartWrap.style.display = "none";
         return;
     }
+
+    if (chartWrap) chartWrap.style.display = "block";
 
     const labels = [];
     const ampData = [];

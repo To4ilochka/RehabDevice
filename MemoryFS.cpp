@@ -65,11 +65,24 @@ bool MemoryFS::saveSession(const SessionRecord& record) {
     // Перед записью проверяем и очищаем память при необходимости (кольцевой буфер)
     checkAndCleanStorage();
 
-    // Формируем имя файла
-    String filename = "/sessions/" + String(record.timestamp) + "_" + record.patientId;
-    filename.replace(" ", "_");
-    filename.replace("/", "_");
-    filename += ".json";
+    // Обязательно гарантируем, что директория /sessions существует
+    if (!LittleFS.exists("/sessions")) {
+        LittleFS.mkdir("/sessions");
+    }
+
+    // Формируем безопасное ASCII-имя файла (без русских букв в пути, так как LittleFS на ESP32
+    // возвращает ошибку при открытии файлов с кириллицей в названии).
+    // Сам patientId ("Иван") при этом целиком и без изменений сохраняется внутри JSON и в индексе!
+    String safeId = "";
+    for (int i = 0; i < (int)record.patientId.length(); i++) {
+        char c = record.patientId[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+            safeId += c;
+        }
+    }
+    String filename = "/sessions/" + String(record.timestamp) + (safeId.length() > 0 ? ("_" + safeId) : "") + ".json";
+
+    Serial.printf("[MemoryFS] Открытие файла на запись: %s (Пациент: %s)\n", filename.c_str(), record.patientId.c_str());
 
     // Сохраняем отдельный JSON-файл сессии
     File file = LittleFS.open(filename, FILE_WRITE);

@@ -13,16 +13,30 @@ SensorMPU::SensorMPU() : dmpReady(false), mpuIntStatus(0), devStatus(0), packetS
 }
 
 bool SensorMPU::init() {
-    // Инициализация I2C шины с частотой 400 кГц
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
+    // Инициализация I2C шины на стандартной надежной скорости 100 кГц
+    // (на 400 кГц из-за емкости проводов и резисторов на макетке сигнал часто искажается)
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 100000);
+    delay(100); // Даем шине и стабилизатору питания время прийти в норму
     
+    // Прямая проверка регистра WHO_AM_I (0x75), чтобы узнать точный ID датчика (MPU6050/6500/клон)
+    Wire.beginTransmission(0x68);
+    Wire.write(0x75);
+    Wire.endTransmission(false);
+    Wire.requestFrom((uint8_t)0x68, (uint8_t)1, (uint8_t)true);
+    uint8_t whoAmI = Wire.read();
+    Serial.printf("[SensorMPU] Чтение регистра WHO_AM_I (0x75) вернуло ID чипа: 0x%02X\n", whoAmI);
+
     // Инициализация MPU6050 по стандартному адресу 0x68
     mpu.initialize();
+    delay(50); // Даем генератору частоты (PLL) датчика время на пробуждение после команды 0x6B
     
-    // Проверка соединения с датчиком
-    if (!mpu.testConnection()) {
-        Serial.println("[SensorMPU] Ошибка: MPU6050 не обнаружен на шине I2C!");
+    // Проверка соединения с датчиком (если чип MPU6050, 6500 или клон с ID 0x68, 0x70, 0x71, 0x73, 0x98)
+    bool conn = mpu.testConnection();
+    if (!conn && whoAmI != 0x68 && whoAmI != 0x70 && whoAmI != 0x71 && whoAmI != 0x73 && whoAmI != 0x98) {
+        Serial.printf("[SensorMPU] Ошибка: MPU6050 не обнаружен (testConnection=false, whoAmI=0x%02X)!\n", whoAmI);
         return false;
+    } else if (!conn) {
+        Serial.printf("[SensorMPU] Предупреждение: testConnection() вернул false, но чип ответил (ID 0x%02X). Продолжаем...\n", whoAmI);
     }
 
     Serial.println("[SensorMPU] Загрузка DMP прошивки в MPU6050...");
@@ -52,7 +66,12 @@ bool SensorMPU::init() {
         packetSize = mpu.dmpGetFIFOPacketSize();
         dmpReady = true;
 
-        Serial.println("[SensorMPU] DMP успешно инициализирован! Готовность к работе.");
+        // Переключаем I2C на максимальную скорость 400 кГц для молниеносной работы в основном цикле
+        Wire.setClock(400000);
+        // Сбрасываем буфер FIFO, чтобы исключить ложное сообщение о переполнении после старта Wi-Fi
+        mpu.resetFIFO();
+
+        Serial.println("[SensorMPU] DMP успешно инициализирован! Готовность к работе (400 кГц).");
         return true;
     } else {
         Serial.printf("[SensorMPU] Ошибка инициализации DMP (код %d)\n", devStatus);
@@ -63,33 +82,33 @@ bool SensorMPU::init() {
 void SensorMPU::update() {
     if (!dmpReady) return;
 
-    // Проверяем наличие прерывания от MPU или накопленных данных в FIFO
-    if (!mpuInterrupt && mpu.getFIFOCount() < packetSize) {
+    // Считываем текущее количество байт в буфере FIFO
+    uint16_t fifoCount = mpu.getFIFOCount();
+
+    // Если нет даже одного полного пакета (42 байта) — выходим
+    if (fifoCount < packetSize) {
         return;
     }
 
-    // Сбрасываем флаг прерывания
+    // Сбрасываем флаг аппаратного прерывания (если было)
     mpuInterrupt = false;
-    mpuIntStatus = mpu.getIntStatus();
+    uint8_t mpuIntStatus = mpu.getIntStatus();
     fifoCount = mpu.getFIFOCount();
 
-    // Проверка переполнения FIFO буфера
+    // Проверка переполнения FIFO буфера (1024 байта)
     if ((mpuIntStatus & (0x01 << MPU6050_INTERRUPT_FIFO_OFLOW_BIT)) || fifoCount >= 1024) {
         mpu.resetFIFO();
         Serial.println("[SensorMPU] Предупреждение: Переполнение FIFO, буфер сброшен!");
         return;
     }
 
-    // Проверяем готовность пакета DMP
-    if (mpuIntStatus & (0x01 << MPU6050_INTERRUPT_DMP_INT_BIT)) {
-        // Дожидаемся полного пакета в буфере
-        while (fifoCount < packetSize) {
+    // Если в буфере есть хотя бы один полный пакет (42 байта) ИЛИ установлен бит готовности DMP
+    if ((mpuIntStatus & (0x01 << MPU6050_INTERRUPT_DMP_INT_BIT)) || fifoCount >= packetSize) {
+        // Вычитываем все полные пакеты до последнего, чтобы визуализация всегда показывала САМЫЙ СВЕЖИЙ угол без задержки!
+        while (fifoCount >= packetSize) {
+            mpu.getFIFOBytes(fifoBuffer, packetSize);
             fifoCount = mpu.getFIFOCount();
         }
-
-        // Читаем пакет из FIFO
-        mpu.getFIFOBytes(fifoBuffer, packetSize);
-        fifoCount -= packetSize;
 
         // Вычисляем кватернионы и углы Эйлера (в радианах, затем переводим в градусы)
         mpu.dmpGetQuaternion(&q, fifoBuffer);
@@ -162,8 +181,9 @@ bool SensorMPU::recalibrate() {
 }
 
 MPUData SensorMPU::getData() {
+    MPUData result = currentData;
     currentData.dataUpdated = false;
-    return currentData;
+    return result;
 }
 
 bool SensorMPU::isReady() const {
