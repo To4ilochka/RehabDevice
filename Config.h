@@ -47,8 +47,10 @@
 // Минимальный запас свободной памяти (в байтах), при падении ниже которого удаляются старые сессии (100 КБ)
 #define FS_MIN_FREE_BYTES                 (100 * 1024)
 // Максимальное количество сессий в индексе (защита от переполнения списка файлов)
-#define FS_MAX_SESSIONS                   100
+#define FS_MAX_SESSIONS                   250
 // Имя файла индекса сессий
-#define FS_SESSIONS_INDEX_FILE            "/sessions_index.json"
+#define FS_SESSIONS_INDEX_FILE            "/p_index.json"
+// Директория для хранения попациентных файлов (.jsonl)
+#define FS_SESSIONS_DIR                   "/p"
 
 #endif // CONFIG_H

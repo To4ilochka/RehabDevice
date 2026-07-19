@@ -155,7 +155,7 @@ String AnalyticsEngine::getFormattedDateTime() {
     if (now < 1000000) {
         // Если время еще не синхронизировано, возвращаем время со старта в секундах
         unsigned long elapsedSec = (millis() - sessionStartTimeMs) / 1000;
-        return "Сессия (+" + String(elapsedSec) + " с)";
+        return "Сесія (+" + String(elapsedSec) + " с)";
     }
     struct tm timeinfo;
     localtime_r(&now, &timeinfo);

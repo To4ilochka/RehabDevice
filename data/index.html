@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="uk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RehabDevice — Система мониторинга реабилитации кисти</title>
-    <!-- Подключение шрифта Inter и библиотеки Chart.js -->
+    <title>RehabDevice — Система моніторингу реабілітації кисті</title>
+    <!-- Підключення шрифту Inter та бібліотеки Chart.js -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -23,11 +23,11 @@
         <div class="header-controls">
             <div class="connection-badge">
                 <div class="status-dot" id="statusDot"></div>
-                <span id="statusText">Подключение...</span>
+                <span id="statusText">Підключення...</span>
             </div>
             <div class="memory-widget">
                 <div class="memory-label">
-                    <span>Память (LittleFS)</span>
+                    <span>Пам'ять (LittleFS)</span>
                     <span id="memoryText">---</span>
                 </div>
                 <div class="memory-progress">
@@ -38,59 +38,59 @@
     </header>
 
     <main>
-        <!-- Навигация по вкладкам -->
+        <!-- Навігація по вкладках -->
         <nav class="tabs-nav">
             <button class="tab-btn active" data-tab="tabPatient">
-                <span>🧘 Тренировка и Мониторинг</span>
+                <span>🧘 Тренування та Моніторинг</span>
             </button>
             <button class="tab-btn" data-tab="tabDoctor">
-                <span>🩺 Интерфейс Врача (Статистика)</span>
+                <span>🩺 Інтерфейс Лікаря (Статистика)</span>
             </button>
         </nav>
 
-        <!-- Вкладка 1: Пациент и реальный режим -->
+        <!-- Вкладка 1: Пацієнт та реальний режим -->
         <section class="tab-content active" id="tabPatient">
             <div class="grid-2">
-                <!-- Левая колонка: Панель управления и авторизации -->
+                <!-- Ліва колонка: Панель керування та авторизації -->
                 <div class="card auth-panel">
                     <div class="card-header">
-                        <div class="card-title">🔐 Авторизация Сессии</div>
+                        <div class="card-title">🔐 Авторизація Сесії</div>
                     </div>
 
-                    <!-- Панель гостя (до авторизации) -->
+                    <!-- Панель гостя (до авторизації) -->
                     <div id="authGuestPanel" style="display: flex; flex-direction: column; gap: 1rem;">
                         <div class="input-group">
-                            <label for="patientIdInput">ФИО / ID Пациента</label>
-                            <input type="text" id="patientIdInput" class="input-field" placeholder="Например: Иван Петров" autocomplete="off">
+                            <label for="patientIdInput">ПІБ / ID Пацієнта</label>
+                            <input type="text" id="patientIdInput" class="input-field" placeholder="Наприклад: Іван Петренко" autocomplete="off">
                         </div>
-                        <button class="btn" id="btnStartSession">🚀 Начать сессию</button>
+                        <button class="btn" id="btnStartSession">🚀 Розпочати сесію</button>
                         <p style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">
-                            ℹ️ Визуализация угла поворота (круг) работает всегда, даже в гостевом режиме без авторизации. При авторизации включается сбор расширенной аналитики и сохранение в память.
+                            ℹ️ Візуалізація кута повороту (коло) працює завжди, навіть у гостьовому режимі без авторизації. При авторизації вмикається збір розширеної аналітики та збереження в пам'ять.
                         </p>
                     </div>
 
-                    <!-- Панель активного пациента -->
+                    <!-- Панель активного пацієнта -->
                     <div id="authActivePanel" style="display: none; flex-direction: column; gap: 1rem;">
                         <div style="padding: 1rem; background: rgba(0, 230, 118, 0.1); border: 1px solid rgba(0, 230, 118, 0.3); border-radius: 12px;">
-                            <span style="font-size: 0.8rem; color: var(--text-secondary);">Активная сессия пациента:</span>
-                            <h3 id="activePatientName" style="font-size: 1.25rem; color: var(--accent-green); margin-top: 0.25rem;">Пациент</h3>
+                            <span style="font-size: 0.8rem; color: var(--text-secondary);">Активна сесія пацієнта:</span>
+                            <h3 id="activePatientName" style="font-size: 1.25rem; color: var(--accent-green); margin-top: 0.25rem;">Пацієнт</h3>
                         </div>
-                        <button class="btn btn-danger" id="btnStopSession">⏹️ Завершить сессию и сохранить</button>
+                        <button class="btn btn-danger" id="btnStopSession">⏹️ Завершити сесію та зберегти</button>
                     </div>
 
                     <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 0.5rem 0;">
 
-                    <!-- Калибровка датчика -->
+                    <!-- Калібрування датчика -->
                     <div class="input-group">
-                        <label>Мгновенная калибровка нулевой позиции</label>
-                        <button class="btn btn-secondary" id="btnRecalibrate">🎯 Рекалибровка 0° на лету</button>
+                        <label>Миттєве калібрування нульової позиції</label>
+                        <button class="btn btn-secondary" id="btnRecalibrate">🎯 Рекалібрування 0° на льоту</button>
                     </div>
                 </div>
 
-                <!-- Правая колонка: Интерактивный круг (Угол наклона) -->
+                <!-- Права колонка: Інтерактивне коло (Кут нахилу) -->
                 <div class="card">
                     <div class="card-header">
-                        <div class="card-title">🔄 Динамическая визуализация угла кисти</div>
+                        <div class="card-title">🔄 Динамічна візуалізація кута кисті</div>
                     </div>
                     <div class="visualizer-container">
                         <div class="circle-wrapper">
@@ -98,84 +98,173 @@
                             <div class="circle-indicator" id="circleIndicator">
                                 <div class="circle-crosshair"></div>
                                 <div class="circle-crosshair vert"></div>
-                                <div class="circle-pointer"></div>
+                                <!-- Оранжева стрілка напрямку повороту кисті -->
+                                <div class="circle-arrow">
+                                    <svg viewBox="0 0 44 110" class="arrow-svg">
+                                        <defs>
+                                            <linearGradient id="arrowGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+                                                <stop offset="0%" stop-color="rgba(255, 145, 0, 0.05)" />
+                                                <stop offset="60%" stop-color="rgba(255, 145, 0, 0.6)" />
+                                                <stop offset="100%" stop-color="#ff9100" />
+                                            </linearGradient>
+                                            <filter id="arrowGlow" x="-50%" y="-50%" width="200%" height="200%">
+                                                <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ff9100" flood-opacity="0.85" />
+                                            </filter>
+                                        </defs>
+                                        <!-- Світловий промінь від центру осі обертання вгору -->
+                                        <path d="M19,110 L25,110 L25,30 L19,30 Z" fill="url(#arrowGrad)" />
+                                        <!-- Оранжевий наконечник стрілки (точково спрямований до обідка) -->
+                                        <path d="M9,32 L22,6 L35,32 Z" fill="#ff9100" filter="url(#arrowGlow)" />
+                                        <!-- Центральна куля осі обертання -->
+                                        <circle cx="22" cy="110" r="5" fill="#ff9100" filter="url(#arrowGlow)" />
+                                    </svg>
+                                </div>
                             </div>
                         </div>
                         <div class="angle-display">
                             <div class="angle-value"><span id="angleValueElem">0.0</span>°</div>
-                            <div class="angle-unit">Текущий угол поворота</div>
+                            <div class="angle-unit">Поточний кут повороту</div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Живая аналитика (отображается только при авторизации пациента) -->
+            <!-- Жива аналітика (відображається лише при авторизації пацієнта) -->
             <div class="card" id="liveStatsPanel" style="display: none;">
                 <div class="card-header">
-                    <div class="card-title">📊 Расширенная аналитика в реальном времени</div>
+                    <div class="card-title">📊 Розширена аналітика в реальному часі</div>
                 </div>
                 <div class="metrics-grid">
                     <div class="metric-box">
-                        <span class="metric-title">Мин / Макс Угол</span>
+                        <span class="metric-title">Мін / Макс Кут</span>
                         <span class="metric-val"><span id="statMin">0.0°</span> / <span id="statMax">0.0°</span></span>
                     </div>
                     <div class="metric-box highlight">
-                        <span class="metric-title">Амплитуда движения</span>
+                        <span class="metric-title">Амплітуда руху</span>
                         <span class="metric-val" id="statAmp">0.0°</span>
                     </div>
                     <div class="metric-box">
-                        <span class="metric-title">Ср. скорость</span>
+                        <span class="metric-title">Сер. швидкість</span>
                         <span class="metric-val" id="statSpeed">0.0°/с</span>
                     </div>
                     <div class="metric-box highlight">
-                        <span class="metric-title">Индекс плавности (тремор)</span>
+                        <span class="metric-title">Індекс плавності (тремор)</span>
                         <span class="metric-val" id="statSmooth" style="color: var(--accent-green);">100%</span>
                     </div>
                     <div class="metric-box highlight">
-                        <span class="metric-title">Сгибания / Повороты</span>
+                        <span class="metric-title">Згинання / Повороти</span>
                         <span class="metric-val" id="statFlex" style="color: var(--accent-orange);">0</span>
                     </div>
                     <div class="metric-box">
-                        <span class="metric-title">Время удержания в краях</span>
+                        <span class="metric-title">Час утримання в краях</span>
                         <span class="metric-val" id="statHold">0.0 с</span>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Вкладка 2: Интерфейс Врача -->
+        <!-- Вкладка 2: Інтерфейс Лікаря -->
         <section class="tab-content" id="tabDoctor">
             <div class="card">
-                <div class="card-header">
-                    <div class="card-title">🩺 Аналитический дашборд пациентов</div>
-                    <button class="btn" id="btnDownloadCSV" style="padding: 0.65rem 1.25rem;">
-                        📥 Скачать данные (CSV)
-                    </button>
+                <div class="card-header" style="flex-wrap: wrap; gap: 1rem;">
+                    <div class="card-title">🩺 Аналітичний дашборд та клінічна динаміка</div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                        <input type="text" id="patientSearchInput" class="input-field" placeholder="🔍 Точне ПІБ пацієнта..." style="width: 220px; padding: 0.55rem 0.9rem; font-size: 0.88rem;">
+                        <button class="btn btn-secondary" id="btnExactSearch" style="padding: 0.55rem 1rem; font-size: 0.88rem;" title="Точний пошук пацієнта">Знайти</button>
+                        <button class="btn" id="btnDownloadCSV" style="padding: 0.55rem 1.15rem; font-size: 0.88rem;" title="Завантажити CSV таблицю">
+                            📥 Завантажити CSV (Всі)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Інтерактивна стрічка тегів (пілсів) з іменами пацієнтів замість випадаючого списку -->
+                <div id="patientPillsContainer" class="patient-pills-strip" style="display: flex; gap: 0.5rem; overflow-x: auto; padding: 0.5rem 0 1.25rem 0; scrollbar-width: thin;">
+                    <button class="patient-pill active" data-patient="ALL">🧑 Всі пацієнти</button>
+                </div>
+
+                <!-- Зведена аналітика щодо обраного пацієнта (З'являється при виборі конкретного ПІБ) -->
+                <div id="patientSummaryContainer" class="patient-summary-box" style="display: none; margin-bottom: 1.75rem;">
+                    <div class="summary-header">
+                        <div>
+                            <span style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); font-weight: 600;">Резюме курсу реабілітації</span>
+                            <h3 id="summaryPatientName" style="font-size: 1.45rem; font-weight: 800; color: var(--accent-primary); margin-top: 0.15rem;">Пацієнт</h3>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                            <div id="summaryProgressBadge" class="progress-badge">
+                                🔥 Прогрес: +0.0° (+0%)
+                            </div>
+                            <button class="btn" id="btnDownloadClientCSV" style="padding: 0.45rem 0.9rem; font-size: 0.82rem; background: rgba(0, 242, 254, 0.15); border-color: rgba(0, 242, 254, 0.4); color: #00f2fe;" title="Завантажити CSV лише для цього клієнта">
+                                📥 Завантажити CSV клієнта
+                            </button>
+                            <button class="btn" id="btnDeletePatient" style="padding: 0.45rem 0.9rem; font-size: 0.82rem; background: rgba(255, 23, 68, 0.15); border-color: rgba(255, 23, 68, 0.4); color: #ff1744;" title="Безповоротно видалити пацієнта та всі його тренування">
+                                🗑️ Видалити пацієнта
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Блок цільової норми та функціонального відновлення -->
+                    <div style="margin: 1rem 0; padding: 0.85rem 1rem; background: rgba(0,0,0,0.25); border-radius: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; border: 1px solid rgba(255,255,255,0.06);">
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">🎯 Цільова норма суглоба:</span>
+                            <input type="number" id="targetNormInput" value="90" min="10" max="180" class="input-field" style="width: 75px; padding: 0.3rem 0.5rem; text-align: center; font-weight: 700; font-size: 0.9rem;">
+                            <span style="font-size: 0.85rem; color: var(--text-muted);">град.</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.6rem;">
+                            <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Функціональне відновлення:</span>
+                            <span id="recoveryIndexVal" style="font-size: 1.05rem; font-weight: 800; color: #00e676;">0%</span>
+                        </div>
+                    </div>
+
+                    <div class="metrics-grid" style="margin-top: 1rem;">
+                        <div class="metric-box">
+                            <span class="metric-title">Старт курсу (1-ша сесія)</span>
+                            <span class="metric-val" id="summaryStartAmp">0.0°</span>
+                            <span class="metric-sub" id="summaryStartDate" style="font-size:0.75rem;color:var(--text-secondary);">--</span>
+                        </div>
+                        <div class="metric-box highlight">
+                            <span class="metric-title">Поточний результат (Амплітуда)</span>
+                            <span class="metric-val" id="summaryCurrentAmp" style="color: var(--accent-primary);">0.0°</span>
+                            <span class="metric-sub" id="summaryCurrentDate" style="font-size:0.75rem;color:var(--text-secondary);">--</span>
+                        </div>
+                        <div class="metric-box">
+                            <span class="metric-title">Сер. індекс плавності</span>
+                            <span class="metric-val" id="summaryAvgSmooth" style="color: var(--accent-green);">0%</span>
+                            <span class="metric-sub" style="font-size:0.75rem;color:var(--text-secondary);">Контроль тремору</span>
+                        </div>
+                        <div class="metric-box">
+                            <span class="metric-title">Всього сесій / згинань</span>
+                            <span class="metric-val"><span id="summaryTotalSessions">0</span> <span style="font-size:0.95rem;font-weight:400;color:var(--text-secondary);">сес.</span> / <span id="summaryTotalFlexions" style="color:var(--accent-orange);">0</span></span>
+                            <span class="metric-sub" style="font-size:0.75rem;color:var(--text-secondary);">Загальний обсяг навантаження</span>
+                        </div>
+                    </div>
                 </div>
                 
-                <div class="chart-wrapper">
-                    <canvas id="doctorChartCanvas"></canvas>
+                <div class="chart-wrapper" id="chartWrapperContainer">
+                    <div id="chartInnerScroll" style="min-width: 100%; height: 100%; position: relative;">
+                        <canvas id="doctorChartCanvas"></canvas>
+                    </div>
                 </div>
 
                 <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 2rem 0;">
 
-                <div class="card-title" style="margin-bottom: 1rem;">📋 История сохраненных сессий (LittleFS)</div>
+                <div class="card-title" style="margin-bottom: 1rem;">📋 Історія збережених сесій <span id="tableFilterLabel" style="font-size:0.85rem; font-weight:400; color:var(--text-secondary);">(Всі пацієнти)</span></div>
                 <div class="table-container">
                     <table>
                         <thead>
                             <tr>
-                                <th>Пациент</th>
-                                <th>Дата и Время</th>
-                                <th>Мин / Макс Угол</th>
-                                <th>Амплитуда</th>
-                                <th>Ср. Скорость</th>
-                                <th>Плавность</th>
-                                <th>Сгибания</th>
+                                <th>Пацієнт</th>
+                                <th>Дата і Час</th>
+                                <th>Мін / Макс Кут</th>
+                                <th>Амплітуда</th>
+                                <th>Сер. Швидкість</th>
+                                <th>Плавність</th>
+                                <th>Згинання</th>
+                                <th>Дія</th>
                             </tr>
                         </thead>
                         <tbody id="sessionsTableBody">
                             <tr>
-                                <td colspan="7" style="text-align: center; color: var(--text-secondary);">Загрузка данных...</td>
+                                <td colspan="8" style="text-align: center; color: var(--text-secondary);">Завантаження даних...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -183,6 +272,19 @@
             </div>
         </section>
     </main>
+
+    <!-- Кастомне модальне вікно підтвердження (гарантовано працює в Captive Portal iOS/Android) -->
+    <div id="customConfirmModal" class="custom-modal-overlay">
+        <div class="custom-modal-box">
+            <div id="customConfirmIcon" class="custom-modal-icon">⚠️</div>
+            <div id="customConfirmTitle" class="custom-modal-title">Підтвердження</div>
+            <div id="customConfirmText" class="custom-modal-text">Ви впевнені?</div>
+            <div class="custom-modal-buttons">
+                <button id="customConfirmCancelBtn" class="btn btn-secondary">Скасувати</button>
+                <button id="customConfirmOkBtn" class="btn btn-danger" style="background: var(--accent-red); border-color: var(--accent-red);">Підтвердити</button>
+            </div>
+        </div>
+    </div>
 
     <script src="app.js"></script>
 </body>

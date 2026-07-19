@@ -2,13 +2,13 @@
 
 // Резервный встроенный HTML интерфейс (на случай, если файлы не загружены в LittleFS)
 static const char FALLBACK_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>RehabDevice</title>
+<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8"><title>RehabDevice</title>
 <style>body{background:#0a0e17;color:#fff;font-family:sans-serif;text-align:center;padding:50px;}
 .box{border:1px solid #00f2fe;padding:30px;border-radius:16px;max-width:500px;margin:0 auto;}
 h1{color:#00f2fe;}</style></head>
-<body><div class="box"><h1>🚀 RehabDevice Подключен!</h1>
-<p>Внутренняя файловая система (LittleFS) еще не прошита файлами веб-интерфейса из папки /data.</p>
-<p>Пожалуйста, загрузите файлы index.html, style.css и app.js через инструмент LittleFS Upload.</p></div></body></html>
+<body><div class="box"><h1>🚀 RehabDevice Підключено!</h1>
+<p>Внутрішня файлова система (LittleFS) ще не прошита файлами веб-інтерфейсу з теки /data.</p>
+<p>Будь ласка, завантажте файли index.html, style.css та app.js через інструмент LittleFS Upload.</p></div></body></html>
 )rawliteral";
 
 WebServerModule::WebServerModule(SensorMPU* sensorPtr, MemoryFS* fsPtr, AnalyticsEngine* analyticsPtr, WiFiManagerModule* wifiPtr)
@@ -130,6 +130,20 @@ void WebServerModule::handleWebSocketMessage(AsyncWebSocketClient* client, uint8
         sensor->recalibrate();
     } else if (cmd == "getSessions") {
         sendSessionsList(client);
+    } else if (cmd == "deleteSession") {
+        String filename = doc["filename"].as<String>();
+        memoryFS->deleteSession(filename);
+        sendSessionsList();
+        broadcastStatus();
+    } else if (cmd == "deletePatient") {
+        String patientId = doc["patientId"].as<String>();
+        memoryFS->deletePatient(patientId);
+        sendSessionsList();
+        broadcastStatus();
+    } else if (cmd == "rebuildIndex") {
+        memoryFS->rebuildIndex();
+        sendSessionsList();
+        broadcastStatus();
     }
 }
 
@@ -175,15 +189,20 @@ void WebServerModule::broadcastLiveStats() {
 }
 
 void WebServerModule::sendSessionsList(AsyncWebSocketClient* client) {
-    String json = memoryFS->getSessionsJSON();
-    // Обрамляем в сообщение для фронтенда
-    String response = "{\"type\":\"sessionsList\"," + json.substring(1); // Заменяем открывающую { на {"type":"sessionsList",
+    if (ws.count() == 0 && !client) return;
 
-    if (client) {
-        client->text(response);
-    } else {
-        ws.textAll(response);
-    }
+    auto sender = [this, client](const String& msg) {
+        if (client) {
+            if (client->status() == WS_CONNECTED) {
+                client->text(msg);
+            }
+        } else {
+            ws.textAll(msg);
+        }
+        yield(); // Микропауза для отправки пакета сетевым стеком LwIP (защита от переполнения TCP-окна)
+    };
+
+    memoryFS->streamSessionsToCallback(sender);
 }
 
 void WebServerModule::cleanupClients() {

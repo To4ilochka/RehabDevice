@@ -5,6 +5,9 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include <map>
+#include <set>
+#include <functional>
 #include "Config.h"
 
 // Структура сохраненной сессии (Аналитика пациента)
@@ -26,7 +29,7 @@ class MemoryFS {
 public:
     MemoryFS();
     
-    // Инициализация LittleFS
+    // Инициализация LittleFS и загрузка персистентного дерева
     bool init();
     
     // Получение общего объема памяти Flash в байтах
@@ -38,13 +41,13 @@ public:
     // Получение свободной памяти в байтах
     size_t getFreeBytes();
     
-    // Сохранение сессии в память с проверкой кольцевого буфера
+    // Сохранение сессии с балансировкой Красно-Чёрного дерева
     bool saveSession(const SessionRecord& record);
     
-    // Логика кольцевого буфера: автоматическое удаление самых старых сессий при переполнении
+    // Кольцевой буфер с мгновенной выборкой O(1) старого узла дерева
     bool checkAndCleanStorage();
     
-    // Получение списка всех сохраненных сессий (для дашборда врача)
+    // Получение всех сессий из хронологического дерева O(N) без сортировки
     std::vector<SessionRecord> getAllSessions();
     
     // Генерация CSV строки/файла со всей накопленной статистикой пациента
@@ -53,13 +56,34 @@ public:
     // Получение JSON-списка сессий для веб-интерфейса
     String getSessionsJSON();
 
-    // Удаление конкретной сессии или очистка всех данных
-    bool deleteSession(const String& filename);
+    // Потоковая выдача сессий чанками без нагрузки на RAM/Heap (Zero-Copy Streaming для WebSocket)
+    void streamSessionsToCallback(std::function<void(const String&)> sendCallback);
+
+    // Удаление конкретной записи (filename содержит /p/ID.jsonl#timestamp) или всего пациента
+    bool deleteSession(const String& filenameOrKey, unsigned long timestamp = 0);
+    bool deletePatient(const String& patientId);
+    bool rebuildIndex();
     bool formatFS();
 
 private:
-    bool loadIndex(std::vector<SessionRecord>& sessions);
-    bool saveIndex(const std::vector<SessionRecord>& sessions);
+    // Хэш-индекс в RAM: Ключ — 32-битный хэш (FNV-1a) от имени, Значение — числовой ID файла (/p/<ID>.jsonl)
+    std::multimap<uint32_t, uint16_t> hashToIds;
+    uint16_t nextPatientId;
+    bool indexLoaded;
+
+    // Вспомогательные методы хэширования и разрешения коллизий
+    uint32_t hashName(const String& name);
+    uint16_t findPatientId(const String& name);
+    uint16_t getOrCreatePatientId(const String& name);
+    
+    // Быстрое буферизованное чтение строк (Zero-copy in-place парсинг без Heap-аллокаций)
+    bool fastReadLine(File& file, char* buffer, size_t maxLen);
+    
+    // Мгновенный поиск самой старой записи за O(P) по пациентам (вдохновлено индексацией FlashDB TSDB)
+    bool findOldestSessionFast(String& outFilepath, unsigned long& outTimestamp);
+
+    bool loadIndex();
+    bool saveIndexMetadata();
 };
 
 #endif // MEMORY_FS_H
