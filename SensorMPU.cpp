@@ -102,16 +102,18 @@ void SensorMPU::update() {
         return;
     }
 
-    // Если в буфере есть хотя бы один полный пакет (42 байта) ИЛИ установлен бит готовности DMP
-    if ((mpuIntStatus & (0x01 << MPU6050_INTERRUPT_DMP_INT_BIT)) || fifoCount >= packetSize) {
-        // Вычитываем все полные пакеты до последнего, чтобы визуализация всегда показывала САМЫЙ СВЕЖИЙ угол без задержки!
-        while (fifoCount >= packetSize) {
-            mpu.getFIFOBytes(fifoBuffer, packetSize);
-            fifoCount = mpu.getFIFOCount();
+    // Используем встроенный в библиотеку безопасный метод получения САМОГО СВЕЖЕГО и выровненного пакета DMP (защита от сдвига и переполнения)
+    if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) {
+        // Вычисляем кватернионы
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+
+        // Дополнительная валидация кватерниона на целостность (для исключения битых пакетов и хаотичных скачков)
+        float normSq = q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z;
+        if (normSq < 0.5f || normSq > 1.5f || isnan(q.w) || isnan(q.x) || isnan(q.y) || isnan(q.z)) {
+            mpu.resetFIFO();
+            return;
         }
 
-        // Вычисляем кватернионы и углы Эйлера (в радианах, затем переводим в градусы)
-        mpu.dmpGetQuaternion(&q, fifoBuffer);
         mpu.dmpGetGravity(&gravity, &q);
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
@@ -123,6 +125,11 @@ void SensorMPU::update() {
         float rawYaw = ypr[0] * 180.0f / M_PI;
         float rawPitch = ypr[1] * 180.0f / M_PI;
         float rawRoll = ypr[2] * 180.0f / M_PI;
+
+        if (isnan(rawRoll) || isnan(rawPitch) || isnan(rawYaw)) {
+            mpu.resetFIFO();
+            return;
+        }
 
         currentData.yaw = rawYaw - yawOffset;
         currentData.pitch = rawPitch - pitchOffset;
@@ -161,7 +168,10 @@ bool SensorMPU::recalibrate() {
     }
 
     uint8_t buffer[64];
-    mpu.getFIFOBytes(buffer, packetSize);
+    if (!mpu.dmpGetCurrentFIFOPacket(buffer)) {
+        mpu.resetFIFO();
+        return false;
+    }
     
     Quaternion tempQ;
     VectorFloat tempGravity;
@@ -169,6 +179,11 @@ bool SensorMPU::recalibrate() {
     mpu.dmpGetQuaternion(&tempQ, buffer);
     mpu.dmpGetGravity(&tempGravity, &tempQ);
     mpu.dmpGetYawPitchRoll(tempYPR, &tempQ, &tempGravity);
+
+    if (isnan(tempYPR[0]) || isnan(tempYPR[1]) || isnan(tempYPR[2])) {
+        mpu.resetFIFO();
+        return false;
+    }
 
     // Устанавливаем текущие углы в качестве нулевых смещений
     yawOffset = tempYPR[0] * 180.0f / M_PI;

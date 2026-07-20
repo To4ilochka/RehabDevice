@@ -58,6 +58,8 @@ public:
 
     // Потоковая выдача сессий чанками без нагрузки на RAM/Heap (Zero-Copy Streaming для WebSocket)
     void streamSessionsToCallback(std::function<void(const String&)> sendCallback);
+    size_t getPatientsCount();
+    bool getPatientSessionsChunk(size_t patientIndex, String& outJson);
 
     // Удаление конкретной записи (filename содержит /p/ID.jsonl#timestamp) или всего пациента
     bool deleteSession(const String& filenameOrKey, unsigned long timestamp = 0);

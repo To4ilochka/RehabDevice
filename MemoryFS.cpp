@@ -434,6 +434,75 @@ void MemoryFS::streamSessionsToCallback(std::function<void(const String&)> sendC
     sendCallback(String(endBuf));
 }
 
+size_t MemoryFS::getPatientsCount() {
+    if (!indexLoaded) rebuildIndex();
+    return hashToIds.size();
+}
+
+bool MemoryFS::getPatientSessionsChunk(size_t patientIndex, String& outJson) {
+    if (!indexLoaded) rebuildIndex();
+    if (patientIndex >= hashToIds.size()) return false;
+
+    auto it = hashToIds.begin();
+    std::advance(it, patientIndex);
+    uint16_t id = it->second;
+
+    String filepath = String(FS_SESSIONS_DIR) + "/" + String(id) + ".jsonl";
+    File file = LittleFS.open(filepath, FILE_READ);
+    if (!file) {
+        outJson = "{\"type\":\"sessionsStreamChunk\",\"data\":[]}";
+        return true;
+    }
+
+    char lineBuf[512];
+    if (!fastReadLine(file, lineBuf, sizeof(lineBuf))) {
+        file.close();
+        outJson = "{\"type\":\"sessionsStreamChunk\",\"data\":[]}";
+        return true;
+    }
+
+    StaticJsonDocument<256> metaDoc;
+    if (deserializeJson(metaDoc, lineBuf) || !metaDoc.containsKey("name")) {
+        file.close();
+        outJson = "{\"type\":\"sessionsStreamChunk\",\"data\":[]}";
+        return true;
+    }
+    String patientName = metaDoc["name"].as<String>();
+
+    outJson = "{\"type\":\"sessionsStreamChunk\",\"data\":[";
+    int items = 0;
+    while (fastReadLine(file, lineBuf, sizeof(lineBuf))) {
+        StaticJsonDocument<512> doc;
+        if (!deserializeJson(doc, lineBuf)) {
+            unsigned long ts = doc["timestamp"] | 0UL;
+            String dateStr = doc["dateStr"].as<String>();
+            float minAngle = doc["minAngle"] | 0.0f;
+            float maxAngle = doc["maxAngle"] | 0.0f;
+            float amplitude = doc["amplitude"] | 0.0f;
+            float avgSpeed = doc["avgSpeed"] | 0.0f;
+            float smoothness = doc["smoothness"] | 0.0f;
+            int flexionsCount = doc["flexionsCount"] | 0;
+            float holdingTime = doc["holdingTime"] | 0.0f;
+            String recFilename = filepath + "#" + String(ts);
+
+            if (items > 0) outJson += ",";
+
+            char itemBuf[512];
+            snprintf(itemBuf, sizeof(itemBuf),
+                     "{\"filename\":\"%s\",\"patientId\":\"%s\",\"timestamp\":%lu,\"dateStr\":\"%s\","
+                     "\"minAngle\":%.1f,\"maxAngle\":%.1f,\"amplitude\":%.1f,\"avgSpeed\":%.1f,"
+                     "\"smoothness\":%.1f,\"flexionsCount\":%d,\"holdingTime\":%.1f}",
+                     recFilename.c_str(), patientName.c_str(), ts, dateStr.c_str(),
+                     minAngle, maxAngle, amplitude, avgSpeed, smoothness, flexionsCount, holdingTime);
+            outJson += itemBuf;
+            items++;
+        }
+    }
+    file.close();
+    outJson += "]}";
+    return true;
+}
+
 String MemoryFS::generateCSV() {
     std::vector<SessionRecord> sessions = getAllSessions();
     String csv = "\uFEFFІм'я Пацієнта,Дата і Час,Мінімальний кут (град),Максимальний кут (град),Амплітуда (град),Середня швидкість (град/с),Плавність (%),Кількість згинань,Час утримання (с)\r\n";

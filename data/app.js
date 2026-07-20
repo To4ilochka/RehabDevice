@@ -7,24 +7,102 @@ let currentPatientName = "";
 let allSessionsData = [];
 let streamedSessionsBuffer = [];
 let selectedDoctorPatient = "ALL";
+let usePolling = false;
+let pollTimer = null;
 
 // Инициализация при полной загрузке DOM
 document.addEventListener("DOMContentLoaded", () => {
-    initWebSocket();
+    initConnection();
     setupTabNavigation();
     setupEventListeners();
     initChart();
 });
 
+// Универсальная отправка команд: WebSocket если подключён, иначе HTTP API
+function sendCommand(cmd, params) {
+    if (!usePolling && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(Object.assign({ cmd: cmd }, params || {})));
+    } else {
+        let url = `/api/cmd?action=${encodeURIComponent(cmd)}`;
+        if (params) {
+            for (const [k, v] of Object.entries(params)) {
+                url += `&${encodeURIComponent(k)}=${encodeURIComponent(v)}`;
+            }
+        }
+        fetch(url).then(() => {
+            // Обновить данные после выполнения команды
+            setTimeout(pollOnce, 400);
+        }).catch(e => console.error("[HTTP] cmd error:", e));
+    }
+}
+
+// Попытка подключения: сначала WebSocket, фоллбэк на HTTP polling через 3 секунды
+function initConnection() {
+    try {
+        initWebSocket();
+    } catch (e) {
+        console.warn("[Connection] WebSocket недоступен, переход на HTTP:", e);
+    }
+
+    // Если через 3 секунды WebSocket не открылся — переключаемся на HTTP polling
+    setTimeout(() => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            console.log("[Connection] WebSocket не подключился, активируем HTTP polling");
+            usePolling = true;
+            if (ws) { try { ws.close(); } catch(e) {} ws = null; }
+            if (reconnectInterval) { clearInterval(reconnectInterval); reconnectInterval = null; }
+            startHttpPolling();
+        }
+    }, 3000);
+}
+
+// HTTP polling — работает в любом браузере, включая iOS Captive Portal (CNA)
+function startHttpPolling() {
+    document.getElementById("statusDot").classList.add("connected");
+    document.getElementById("statusText").textContent = "Пристрій підключено";
+
+    // Синхронизация времени
+    const nowUnix = Math.floor(Date.now() / 1000);
+    fetch(`/api/cmd?action=syncTime&timestamp=${nowUnix}`).catch(() => {});
+
+    // Загрузка списка сессий
+    fetch("/api/sessions")
+        .then(r => r.json())
+        .then(data => {
+            allSessionsData = data.sessions || [];
+            renderPatientPills(allSessionsData);
+            updateDoctorDashboardView();
+        }).catch(() => {});
+
+    // Периодический опрос статуса (каждые 2 секунды)
+    pollTimer = setInterval(pollOnce, 2000);
+}
+
+function pollOnce() {
+    fetch("/api/status")
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById("statusDot").classList.add("connected");
+            document.getElementById("statusText").textContent = "Пристрій підключено (HTTP)";
+            handleServerMessage(data);
+            // Кут вбудований в відповідь /api/status
+            if (data.angle !== undefined) {
+                handleServerMessage({ type: "angle", angle: data.angle });
+            }
+        }).catch(() => {
+            document.getElementById("statusDot").classList.remove("connected");
+            document.getElementById("statusText").textContent = "Відключено (очікування HTTP...)";
+        });
+}
+
 // Настройка подключения к WebSocket
 function initWebSocket() {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    
+    const wsUrl = `ws://${window.location.host || "192.168.4.1"}/ws`;
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
         console.log("[WebSocket] Соединение установлено");
+        usePolling = false;
         document.getElementById("statusDot").classList.add("connected");
         document.getElementById("statusText").textContent = "Пристрій підключено";
         
@@ -32,16 +110,19 @@ function initWebSocket() {
             clearInterval(reconnectInterval);
             reconnectInterval = null;
         }
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
 
-        // Автоматическая незаметная синхронизация времени с устройством врача
-        const nowUnix = Math.floor(Date.now() / 1000);
-        ws.send(JSON.stringify({ cmd: "syncTime", timestamp: nowUnix }));
-        
-        // Запрос списка сессий для вкладки врача
-        ws.send(JSON.stringify({ cmd: "getSessions" }));
+        sendCommand("syncTime", { timestamp: Math.floor(Date.now() / 1000) });
+        sendCommand("getSessions");
     };
 
+    ws.onerror = () => {};
+
     ws.onclose = () => {
+        if (usePolling) return; // Уже в режиме polling, не пытаемся переподключиться
         console.log("[WebSocket] Соединение потеряно");
         document.getElementById("statusDot").classList.remove("connected");
         document.getElementById("statusText").textContent = "Відключено (перепідключення...)";
@@ -57,9 +138,7 @@ function initWebSocket() {
         try {
             const data = JSON.parse(event.data);
             handleServerMessage(data);
-        } catch (e) {
-            console.error("[WebSocket] Ошибка парсинга JSON:", e);
-        }
+        } catch (e) {}
     };
 }
 
@@ -141,9 +220,7 @@ function setupTabNavigation() {
 
             if (targetId === "tabDoctor") {
                 updateDoctorDashboardView();
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ cmd: "getSessions" }));
-                }
+                sendCommand("getSessions");
             }
         });
     });
@@ -165,33 +242,27 @@ function setupEventListeners() {
             alert("Будь ласка, введіть ПІБ пацієнта для початку сесії.");
             return;
         }
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ cmd: "startSession", patientId: name }));
-            isAuthorized = true;
-            currentPatientName = name;
-            showAuthorizedUI();
-        }
+        sendCommand("startSession", { patientId: name });
+        isAuthorized = true;
+        currentPatientName = name;
+        showAuthorizedUI();
     });
 
     // Выйти (остановить сессию)
     document.getElementById("btnStopSession").addEventListener("click", () => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ cmd: "stopSession" }));
-            isAuthorized = false;
-            showGuestUI();
-            ws.send(JSON.stringify({ cmd: "getSessions" }));
-        }
+        sendCommand("stopSession");
+        isAuthorized = false;
+        showGuestUI();
+        setTimeout(() => sendCommand("getSessions"), 500);
     });
 
     // Рекалибровка датчика на лету
     document.getElementById("btnRecalibrate").addEventListener("click", () => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ cmd: "recalibrate" }));
-            const btn = document.getElementById("btnRecalibrate");
-            const originalText = btn.textContent;
-            btn.textContent = "Калібрується...";
-            setTimeout(() => { btn.textContent = originalText; }, 1200);
-        }
+        sendCommand("recalibrate");
+        const btn = document.getElementById("btnRecalibrate");
+        const originalText = btn.textContent;
+        btn.textContent = "Калібрується...";
+        setTimeout(() => { btn.textContent = originalText; }, 1200);
     });
 
     // Скачать CSV данные (Умно отфильтрованные под выбранного пациента или всех)
@@ -235,10 +306,8 @@ function setupEventListeners() {
             `Ви дійсно хочете безповоротно видалити ВСІ записи пацієнта «${selectedDoctorPatient}» з флеш-пам'яті пристрою?`,
             "Видалити все",
             () => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ cmd: "deletePatient", patientId: selectedDoctorPatient }));
-                    selectPatientByPill("ALL", true);
-                }
+                sendCommand("deletePatient", { patientId: selectedDoctorPatient });
+                selectPatientByPill("ALL", true);
             }
         );
     });
@@ -567,8 +636,8 @@ function renderDoctorSessions(sessions) {
 
     // Динамически расширяем внутренний контейнер (#chartInnerScroll), чтобы столбцы в Chart.js ИЛИ Canvas НИКОГДА не сжимались (не плющились)
     const innerScroll = document.getElementById("chartInnerScroll");
-    const chartWrap = document.getElementById("chartWrapperContainer") || document.querySelector(".chart-wrapper");
-    const baseW = chartWrap ? (chartWrap.clientWidth || 320) : 320;
+    const chartWrapContainer = document.getElementById("chartWrapperContainer") || chartWrap;
+    const baseW = chartWrapContainer ? (chartWrapContainer.clientWidth || 320) : 320;
     const reqW = Math.max(baseW, sessions.length * 58 + 65);
 
     if (innerScroll) {
@@ -711,9 +780,7 @@ function deleteSingleSession(filename, dateStr, patientId) {
         `Ви впевнені, що хочете видалити тренування від ${dateStr} для пацієнта «${patientId || "Пацієнт"}»?`,
         "Видалити",
         () => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ cmd: "deleteSession", filename: filename }));
-            }
+            sendCommand("deleteSession", { filename: filename });
         }
     );
 }

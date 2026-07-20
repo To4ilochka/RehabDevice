@@ -54,8 +54,9 @@ void loop() {
     // 2. Обслуживание DNS-запросов для работы Captive Portal
     wifiManager.update();
 
-    // 3. Очистка отключенных клиентов WebSocket
+    // 3. Очистка отключенных клиентов WebSocket и обработка очереди потоковой выдачи сессий
     webServer.cleanupClients();
+    webServer.update();
 
     // 4. Получение новых данных датчика и расчет аналитики
     if (sensor.isReady()) {

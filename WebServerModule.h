@@ -31,6 +31,12 @@ public:
     // Отправка списка сессий для построения графиков
     void sendSessionsList(AsyncWebSocketClient* client = nullptr);
 
+    // Регулярный вызов из основного цикла loop() для безопасной отправки потоковых чанков на Core 1
+    void update();
+
+    // Отправка информации о статусе конкретному подключившемуся клиенту
+    void sendStatusToClient(AsyncWebSocketClient* client);
+
     // Обработчик очистки неактивных клиентов WebSocket
     void cleanupClients();
 
@@ -45,6 +51,16 @@ private:
 
     unsigned long lastStatusBroadcastMs;
     unsigned long lastStatsBroadcastMs;
+    unsigned long lastCleanupMs;
+
+    struct StreamState {
+        bool active = false;
+        uint32_t clientId = 0;
+        size_t currentPatientIdx = 0;
+        bool headerSent = false;
+    };
+    StreamState streamState;
+    uint32_t sendInitialStatusClientId;
 
     // Внутренние обработчики событий WebSocket
     void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type,
