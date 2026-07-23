@@ -10,16 +10,8 @@ class WiFiManagerModule {
 public:
     WiFiManagerModule();
     
-    // Запуск точки доступа (SoftAP) и Captive Portal DNS сервера
     bool init();
-    
-    // Обслуживание DNS сервера в главном цикле (для работы Captive Portal)
     void update();
-    
-    // Получение IP-адреса точки доступа
-    IPAddress getAPIP() const;
-    
-    // Получение количества активных подключенных клиентов
     int getConnectedClientsCount() const;
 
 private:

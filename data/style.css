@@ -14,7 +14,7 @@
     --border-color: rgba(255, 255, 255, 0.12);
     --border-radius: 16px;
     --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.5);
-    color-scheme: dark; /* Предотвращает появление белых полос прокрутки и белого фона при отскоке в iOS CNA */
+    color-scheme: dark; /* Prevents white scrollbars and white background on bounce in iOS CNA */
 }
 
 * {
@@ -42,11 +42,11 @@ body {
     display: flex;
     flex-direction: column;
     overflow-x: hidden;
-    overscroll-behavior-y: none; /* Убирает белую полосу отскока на мобильных устройствах */
+    overscroll-behavior-y: none; /* Removes white bounce bar on mobile devices */
     -webkit-font-smoothing: antialiased;
 }
 
-/* Навигация и хедер */
+/* Navigation and Header */
 header {
     background: rgba(10, 14, 23, 0.85);
     backdrop-filter: blur(12px);
@@ -92,7 +92,7 @@ header {
     letter-spacing: 0.08em;
 }
 
-/* Индикатор статуса и памяти */
+/* Status Indicator and Memory Bar */
 .header-controls {
     display: flex;
     align-items: center;
@@ -154,7 +154,7 @@ header {
     transition: width 0.5s ease;
 }
 
-/* Основной контейнер и табы */
+/* Main Container and Tabs */
 main {
     flex: 1;
     max-width: 1400px;
@@ -210,7 +210,7 @@ main {
     gap: 1.5rem;
 }
 
-/* Карточки и сетка */
+/* Cards and Layout Grid */
 .grid-2 {
     display: grid;
     grid-template-columns: 1fr 1.2fr;
@@ -252,7 +252,7 @@ main {
     gap: 0.5rem;
 }
 
-/* Панель авторизации пациента */
+/* Patient Authentication Panel */
 .auth-panel {
     display: flex;
     flex-direction: column;
@@ -327,7 +327,7 @@ main {
     box-shadow: 0 4px 16px rgba(255, 23, 68, 0.25);
 }
 
-/* Визуализация круга (гость и пациент) */
+/* Circle Visualizer (Guest & Patient) */
 .visualizer-container {
     display: flex;
     flex-direction: column;
@@ -417,7 +417,7 @@ main {
     font-weight: 600;
 }
 
-/* Живая аналитика (сетка метрик) */
+/* Live Analytics Grid */
 .metrics-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -458,7 +458,7 @@ main {
     color: var(--text-primary);
 }
 
-/* Таблица и интерфейс врача */
+/* Doctor Table and Summary Interface */
 .table-container {
     overflow-x: auto;
     width: 100%;
@@ -541,26 +541,13 @@ tr:hover td {
     box-shadow: 0 0 12px rgba(255, 23, 68, 0.2);
 }
 
-#doctorPatientSelect {
-    background: rgba(15, 23, 42, 0.85);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    outline: none;
-    transition: border-color 0.3s ease;
-}
-
-#doctorPatientSelect:focus {
-    border-color: var(--accent-primary);
-}
-
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }
 }
 
 /* ============================================================================
-   АДАПТИВНОСТЬ ДЛЯ ПЛАНШЕТОВ И МОБИЛЬНЫХ ТЕЛЕФОНОВ (В Т.Ч. CAPTIVE PORTAL)
+   RESPONSIVE DESIGN FOR TABLETS AND MOBILE PHONES (INCLUDING CAPTIVE PORTAL)
    ============================================================================ */
 @media (max-width: 968px) {
     .grid-2 {
@@ -616,7 +603,7 @@ tr:hover td {
     }
 
     .chart-wrapper {
-        height: 240px; /* Уменьшаем график на мобильных, чтобы не занимать весь экран */
+        height: 240px; /* Reduced chart height on mobile */
     }
 
     .circle-wrapper {
@@ -654,7 +641,7 @@ tr:hover td {
     }
 }
 
-/* Кастомное модальное окно подтверждения (для работы в Captive Portal iOS/Android, где блокируется window.confirm) */
+/* Custom Confirmation Modal (for iOS/Android Captive Portal compatibility where window.confirm is blocked) */
 .custom-modal-overlay {
     position: fixed;
     top: 0;
@@ -726,7 +713,7 @@ tr:hover td {
     font-size: 0.9rem;
 }
 
-/* Стили для интерактивных кнопок-тегов (пилсов) выбора пациента */
+/* Patient Pills Selector Strip */
 .patient-pills-strip {
     display: flex;
     gap: 0.5rem;

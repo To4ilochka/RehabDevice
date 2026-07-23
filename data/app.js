@@ -1,4 +1,4 @@
-// Глобальные переменные WebSocket и графиков
+// Global WebSocket, Chart, and application state variables
 let ws = null;
 let doctorChart = null;
 let reconnectInterval = null;
@@ -10,7 +10,7 @@ let selectedDoctorPatient = "ALL";
 let usePolling = false;
 let pollTimer = null;
 
-// Инициализация при полной загрузке DOM
+// Initialize on DOM content loaded
 document.addEventListener("DOMContentLoaded", () => {
     initConnection();
     setupTabNavigation();
@@ -18,7 +18,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initChart();
 });
 
-// Универсальная отправка команд: WebSocket если подключён, иначе HTTP API
+// Send commands via WebSocket if open, otherwise fallback to HTTP API
 function sendCommand(cmd, params) {
     if (!usePolling && ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(Object.assign({ cmd: cmd }, params || {})));
@@ -30,24 +30,24 @@ function sendCommand(cmd, params) {
             }
         }
         fetch(url).then(() => {
-            // Обновить данные после выполнения команды
+            // Poll immediately after executing command
             setTimeout(pollOnce, 400);
-        }).catch(e => console.error("[HTTP] cmd error:", e));
+        }).catch(e => console.error("[HTTP] Command error:", e));
     }
 }
 
-// Попытка подключения: сначала WebSocket, фоллбэк на HTTP polling через 3 секунды
+// Attempt WebSocket connection with fallback to HTTP polling after 3 seconds
 function initConnection() {
     try {
         initWebSocket();
     } catch (e) {
-        console.warn("[Connection] WebSocket недоступен, переход на HTTP:", e);
+        console.warn("[Connection] WebSocket unavailable, switching to HTTP:", e);
     }
 
-    // Если через 3 секунды WebSocket не открылся — переключаемся на HTTP polling
+    // If WebSocket fails to open within 3 seconds, activate HTTP polling fallback
     setTimeout(() => {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
-            console.log("[Connection] WebSocket не подключился, активируем HTTP polling");
+            console.log("[Connection] WebSocket failed to open, activating HTTP polling");
             usePolling = true;
             if (ws) { try { ws.close(); } catch(e) {} ws = null; }
             if (reconnectInterval) { clearInterval(reconnectInterval); reconnectInterval = null; }
@@ -56,16 +56,16 @@ function initConnection() {
     }, 3000);
 }
 
-// HTTP polling — работает в любом браузере, включая iOS Captive Portal (CNA)
+// HTTP polling fallback for Captive Portal environments and restricted browsers
 function startHttpPolling() {
     document.getElementById("statusDot").classList.add("connected");
     document.getElementById("statusText").textContent = "Пристрій підключено";
 
-    // Синхронизация времени
+    // Synchronize client timestamp with ESP32
     const nowUnix = Math.floor(Date.now() / 1000);
     fetch(`/api/cmd?action=syncTime&timestamp=${nowUnix}`).catch(() => {});
 
-    // Загрузка списка сессий
+    // Load initial sessions list
     fetch("/api/sessions")
         .then(r => r.json())
         .then(data => {
@@ -74,7 +74,7 @@ function startHttpPolling() {
             updateDoctorDashboardView();
         }).catch(() => {});
 
-    // Периодический опрос статуса (каждые 2 секунды)
+    // Periodic status polling (every 2 seconds)
     pollTimer = setInterval(pollOnce, 2000);
 }
 
@@ -85,7 +85,6 @@ function pollOnce() {
             document.getElementById("statusDot").classList.add("connected");
             document.getElementById("statusText").textContent = "Пристрій підключено (HTTP)";
             handleServerMessage(data);
-            // Кут вбудований в відповідь /api/status
             if (data.angle !== undefined) {
                 handleServerMessage({ type: "angle", angle: data.angle });
             }
@@ -95,13 +94,13 @@ function pollOnce() {
         });
 }
 
-// Настройка подключения к WebSocket
+// Initialize WebSocket connection and handlers
 function initWebSocket() {
     const wsUrl = `ws://${window.location.host || "192.168.4.1"}/ws`;
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-        console.log("[WebSocket] Соединение установлено");
+        console.log("[WebSocket] Connection established");
         usePolling = false;
         document.getElementById("statusDot").classList.add("connected");
         document.getElementById("statusText").textContent = "Пристрій підключено";
@@ -122,8 +121,8 @@ function initWebSocket() {
     ws.onerror = () => {};
 
     ws.onclose = () => {
-        if (usePolling) return; // Уже в режиме polling, не пытаемся переподключиться
-        console.log("[WebSocket] Соединение потеряно");
+        if (usePolling) return;
+        console.log("[WebSocket] Connection closed");
         document.getElementById("statusDot").classList.remove("connected");
         document.getElementById("statusText").textContent = "Відключено (перепідключення...)";
         
@@ -142,10 +141,10 @@ function initWebSocket() {
     };
 }
 
-// Обработка входящих сообщений от ESP32
+// Process incoming telemetry and status messages from ESP32
 function handleServerMessage(data) {
     if (data.type === "angle") {
-        // Динамическое отображение угла на круге (работает всегда, даже в гостевом режиме)
+        // Real-time angle update on visual circle (works in guest and active modes)
         const circle = document.getElementById("circleIndicator");
         const valElem = document.getElementById("angleValueElem");
         
@@ -156,7 +155,7 @@ function handleServerMessage(data) {
             valElem.textContent = data.angle.toFixed(1);
         }
     } else if (data.type === "status") {
-        // Обновление индикатора свободной памяти LittleFS
+        // Update LittleFS storage usage indicator
         const used = data.usedBytes || 0;
         const total = data.totalBytes || 1;
         const percent = Math.min(100, Math.round((used / total) * 100));
@@ -165,7 +164,7 @@ function handleServerMessage(data) {
         document.getElementById("memoryText").textContent = 
             `${Math.round(used / 1024)} / ${Math.round(total / 1024)} КБ (${100 - percent}% вільно)`;
 
-        // Синхронизация состояния авторизации на случай перезагрузки страницы
+        // Synchronize authorization state in case of page refresh
         if (data.sessionActive) {
             isAuthorized = true;
             currentPatientName = data.patientId;
@@ -175,7 +174,7 @@ function handleServerMessage(data) {
             showGuestUI();
         }
     } else if (data.type === "liveStats") {
-        // Обновление живых метрик активной сессии
+        // Update real-time training metrics during active session
         document.getElementById("statMin").textContent = `${data.minAngle.toFixed(1)}°`;
         document.getElementById("statMax").textContent = `${data.maxAngle.toFixed(1)}°`;
         document.getElementById("statAmp").textContent = `${data.amplitude.toFixed(1)}°`;
@@ -184,27 +183,27 @@ function handleServerMessage(data) {
         document.getElementById("statFlex").textContent = `${data.flexionsCount}`;
         document.getElementById("statHold").textContent = `${data.holdingTime.toFixed(1)} с`;
     } else if (data.type === "sessionsList") {
-        // Сохраняем все сессии, отрисовываем пиллинг-теги по пациентам и обновляем дашборд
+        // Store all sessions, render patient pills, and update doctor dashboard
         allSessionsData = data.sessions || [];
         renderPatientPills(allSessionsData);
         updateDoctorDashboardView();
     } else if (data.type === "sessionsStreamStart") {
-        // Старт приема потокового чанкового списка сессий (Zero-Copy Streaming)
+        // Start receiving chunked session stream (zero-copy streaming)
         streamedSessionsBuffer = [];
     } else if (data.type === "sessionsStreamChunk") {
-        // Мгновенное добавление новой порции сессий в буфер памяти браузера
+        // Append chunk of sessions to in-memory buffer
         if (Array.isArray(data.data)) {
             streamedSessionsBuffer.push(...data.data);
         }
     } else if (data.type === "sessionsStreamEnd") {
-        // Поток завершен, выполняем хронологическую сортировку (O(N log N) в JS за 0.1 мс) и обновляем дашборд
+        // Stream completed: sort chronologically and update dashboard
         allSessionsData = streamedSessionsBuffer.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         renderPatientPills(allSessionsData);
         updateDoctorDashboardView();
     }
 }
 
-// Переключение вкладок
+// Setup tab navigation and resizing behavior
 function setupTabNavigation() {
     const tabBtns = document.querySelectorAll(".tab-btn");
     const tabContents = document.querySelectorAll(".tab-content");
@@ -232,9 +231,9 @@ function setupTabNavigation() {
     });
 }
 
-// Слушатели кнопок
+// Setup event listeners for UI buttons and inputs
 function setupEventListeners() {
-    // Начать сессию
+    // Start session button
     document.getElementById("btnStartSession").addEventListener("click", () => {
         const input = document.getElementById("patientIdInput");
         const name = input.value.trim();
@@ -248,7 +247,7 @@ function setupEventListeners() {
         showAuthorizedUI();
     });
 
-    // Выйти (остановить сессию)
+    // Stop session button
     document.getElementById("btnStopSession").addEventListener("click", () => {
         sendCommand("stopSession");
         isAuthorized = false;
@@ -256,7 +255,7 @@ function setupEventListeners() {
         setTimeout(() => sendCommand("getSessions"), 500);
     });
 
-    // Рекалибровка датчика на лету
+    // Recalibrate sensor on the fly
     document.getElementById("btnRecalibrate").addEventListener("click", () => {
         sendCommand("recalibrate");
         const btn = document.getElementById("btnRecalibrate");
@@ -265,17 +264,17 @@ function setupEventListeners() {
         setTimeout(() => { btn.textContent = originalText; }, 1200);
     });
 
-    // Скачать CSV данные (Умно отфильтрованные под выбранного пациента или всех)
+    // Download filtered or global CSV dataset
     document.getElementById("btnDownloadCSV")?.addEventListener("click", () => {
         downloadFilteredCSV();
     });
 
-    // Скачать CSV конкретного выбранного клиента из блока резюме
+    // Download CSV dataset for currently selected client
     document.getElementById("btnDownloadClientCSV")?.addEventListener("click", () => {
         downloadFilteredCSV();
     });
 
-    // Точный поиск по совпадению имени (без префиксного перебора)
+    // Search input handlers
     const searchInput = document.getElementById("patientSearchInput");
     const exactSearchBtn = document.getElementById("btnExactSearch");
     
@@ -298,7 +297,7 @@ function setupEventListeners() {
         });
     }
 
-    // Удаление всех записей выбранного пациента (Система от дурака с подтверждением через кастомный модал)
+    // Delete all records for selected patient with custom confirmation modal
     document.getElementById("btnDeletePatient")?.addEventListener("click", () => {
         if (selectedDoctorPatient === "ALL") return;
         showCustomConfirm(
@@ -312,13 +311,13 @@ function setupEventListeners() {
         );
     });
 
-    // Динамический перерасчёт функционального восстановления при изменении целевой нормы
+    // Recalculate recovery index dynamically when target norm changes
     document.getElementById("targetNormInput")?.addEventListener("input", () => {
         updateDoctorDashboardView();
     });
 }
 
-// Переключение интерфейса между Гостем и Авторизованным пациентом
+// Switch between Guest UI and Authorized Patient UI
 function showAuthorizedUI() {
     document.getElementById("authGuestPanel").style.display = "none";
     document.getElementById("authActivePanel").style.display = "flex";
@@ -333,7 +332,7 @@ function showGuestUI() {
     document.getElementById("patientIdInput").value = "";
 }
 
-// Инициализация Chart.js графика
+// Initialize Chart.js configuration
 function initChart() {
     const ctx = document.getElementById("doctorChartCanvas");
     if (!ctx || typeof Chart === "undefined") return;
@@ -391,13 +390,11 @@ function initChart() {
     });
 }
 
-// Заполнение списка выбора пациентов
-// Отрисовка интерактивных тегов-пилсов для выбора пациента (вместо выпадающего списка)
+// Render interactive pills for patient selection
 function renderPatientPills(sessions) {
     const container = document.getElementById("patientPillsContainer");
     if (!container) return;
 
-    // Считаем количество сессий для каждого уникального пациента
     const counts = {};
     sessions.forEach(s => {
         const name = (s.patientId || "Пацієнт").trim();
@@ -409,7 +406,7 @@ function renderPatientPills(sessions) {
     container.innerHTML = "";
     const fragment = document.createDocumentFragment();
 
-    // Кнопка "Все пациенты"
+    // "All Patients" pill button
     const allBtn = document.createElement("button");
     allBtn.className = `patient-pill ${selectedDoctorPatient === "ALL" ? "active" : ""}`;
     allBtn.setAttribute("data-patient", "ALL");
@@ -417,7 +414,7 @@ function renderPatientPills(sessions) {
     allBtn.onclick = () => selectPatientByPill("ALL", true);
     fragment.appendChild(allBtn);
 
-    // Кнопки для каждого пациента
+    // Individual patient pill buttons
     uniquePatients.forEach(name => {
         const btn = document.createElement("button");
         btn.className = `patient-pill ${selectedDoctorPatient === name ? "active" : ""}`;
@@ -430,11 +427,10 @@ function renderPatientPills(sessions) {
     container.appendChild(fragment);
 }
 
-// Выбор пациента по нажатию на пилс или на имя в таблице
+// Select patient when clicking pill or table cell
 function selectPatientByPill(patientName, triggerUpdate = true) {
     selectedDoctorPatient = patientName;
     
-    // Обновляем активность пилсов
     document.querySelectorAll(".patient-pill").forEach(btn => {
         if (btn.getAttribute("data-patient") === patientName) {
             btn.classList.add("active");
@@ -443,14 +439,13 @@ function selectPatientByPill(patientName, triggerUpdate = true) {
         }
     });
 
-    // Очищаем поисковую строку при выборе конкретного пилса, чтобы увидеть все его записи
     const searchInput = document.getElementById("patientSearchInput");
     if (searchInput && triggerUpdate) searchInput.value = "";
 
     if (triggerUpdate) updateDoctorDashboardView();
 }
 
-// Обновление дашборда при выборе пациента из фильтра или при поиске
+// Update doctor dashboard view when selecting patient or filtering
 function updateDoctorDashboardView(searchQuery = "", isExactSearch = false) {
     const filterLabel = document.getElementById("tableFilterLabel");
     const summaryBox = document.getElementById("patientSummaryContainer");
@@ -458,9 +453,7 @@ function updateDoctorDashboardView(searchQuery = "", isExactSearch = false) {
     let filtered = allSessionsData;
     if (isExactSearch && searchQuery && typeof searchQuery === "string" && searchQuery.length > 0) {
         const query = searchQuery.trim().toLowerCase();
-        // Сначала ищем точное совпадение
         filtered = allSessionsData.filter(s => (s.patientId || "").trim().toLowerCase() === query);
-        // Если точных совпадений нет, ищем по подстроке (префикс или частичное совпадение)
         if (filtered.length === 0) {
             filtered = allSessionsData.filter(s => (s.patientId || "").trim().toLowerCase().includes(query));
         }
@@ -479,11 +472,10 @@ function updateDoctorDashboardView(searchQuery = "", isExactSearch = false) {
         if (filterLabel) filterLabel.textContent = "(Всі пацієнти)";
     }
 
-    // Расчёт целевой нормы и функционального восстановления
     const normInput = document.getElementById("targetNormInput");
     const targetNorm = normInput ? (parseFloat(normInput.value) || 90.0) : 90.0;
 
-    // Расчёт и отображение клинического резюме прогресса или красивого уведомления о пустом поиске
+    // Display clinical summary or empty search notification
     if (isExactSearch && searchQuery && filtered.length === 0 && summaryBox) {
         summaryBox.innerHTML = `
             <div style="padding: 1.8rem 1rem; text-align: center; background: rgba(255, 23, 68, 0.08); border: 1px dashed rgba(255, 23, 68, 0.45); border-radius: 14px; margin-bottom: 0.5rem;">
@@ -495,7 +487,6 @@ function updateDoctorDashboardView(searchQuery = "", isExactSearch = false) {
         `;
         summaryBox.style.display = "block";
     } else if ((selectedDoctorPatient !== "ALL" || searchQuery) && filtered.length > 0 && summaryBox) {
-        // Восстанавливаем оригинальную разметку резюме, если она была заменена сообщением о пустом поиске
         if (!document.getElementById("summaryPatientName")) {
             summaryBox.innerHTML = `
                 <div class="summary-header">
@@ -559,7 +550,7 @@ function updateDoctorDashboardView(searchQuery = "", isExactSearch = false) {
         const totalFlex = filtered.reduce((sum, s) => sum + (s.flexionsCount || 0), 0);
         document.getElementById("summaryTotalFlexions").textContent = `${totalFlex}`;
 
-        // Расчёт индекса функционального восстановления от целевой нормы
+        // Compute functional recovery index relative to target norm
         const recoveryIndex = Math.min(100, Math.round(((latest.amplitude || 0) / targetNorm) * 100));
         const recElem = document.getElementById("recoveryIndexVal");
         if (recElem) {
@@ -575,7 +566,7 @@ function updateDoctorDashboardView(searchQuery = "", isExactSearch = false) {
     renderDoctorSessions(filtered);
 }
 
-// Отрисовка таблицы и графика для врача (Оптимизировано через DocumentFragment для 250+ строк за 1 перерисовку)
+// Render sessions table and chart using DocumentFragment for maximum performance
 function renderDoctorSessions(sessions) {
     const tbody = document.getElementById("sessionsTableBody");
     const chartWrap = document.querySelector(".chart-wrapper");
@@ -597,7 +588,7 @@ function renderDoctorSessions(sessions) {
 
     const fragment = document.createDocumentFragment();
 
-    // Заполнение таблицы в обратном порядке (сначала новые)
+    // Render table rows in reverse chronological order (newest first)
     sessions.slice().reverse().forEach(rec => {
         const tr = document.createElement("tr");
         tr.innerHTML = `
@@ -616,7 +607,6 @@ function renderDoctorSessions(sessions) {
         `;
         fragment.appendChild(tr);
 
-        // Данные для графика (двухстрочные подписи для избежания наложений: имя и дата отдельными строками)
         const dateParts = (rec.dateStr || "").split(" ");
         const shortDate = dateParts[0] || "";
         const shortTime = dateParts[1] || "";
@@ -634,7 +624,7 @@ function renderDoctorSessions(sessions) {
 
     tbody.appendChild(fragment);
 
-    // Динамически расширяем внутренний контейнер (#chartInnerScroll), чтобы столбцы в Chart.js ИЛИ Canvas НИКОГДА не сжимались (не плющились)
+    // Dynamically expand inner container width (#chartInnerScroll) to prevent bar squishing
     const innerScroll = document.getElementById("chartInnerScroll");
     const chartWrapContainer = document.getElementById("chartWrapperContainer") || chartWrap;
     const baseW = chartWrapContainer ? (chartWrapContainer.clientWidth || 320) : 320;
@@ -647,9 +637,8 @@ function renderDoctorSessions(sessions) {
     drawAutonomousChart(sessions, labels, ampData, smoothData, reqW);
 }
 
-// 100% автономная отрисовка графика (работает даже в Captive Portal без интернета и CDN)
+// Autonomous HTML5 Canvas chart renderer (works offline and in Captive Portal without CDN)
 function drawAutonomousChart(sessions, labels, ampData, smoothData, reqW = 320) {
-    // Если CDN Chart.js загружен, используем его
     if (doctorChart && typeof Chart !== "undefined") {
         doctorChart.data.labels = labels;
         doctorChart.data.datasets[0].data = ampData;
@@ -659,21 +648,17 @@ function drawAutonomousChart(sessions, labels, ampData, smoothData, reqW = 320) 
         return;
     }
 
-    // Отрисовка на чистом HTML5 Canvas (когда нет интернета для загрузки Chart.js с CDN)
     const canvas = document.getElementById("doctorChartCanvas");
     if (!canvas || sessions.length === 0) return;
     
-    // Получаем реальные размеры родителя (контейнера .chart-wrapper)
     const wrapper = canvas.parentElement;
     const rect = wrapper ? wrapper.getBoundingClientRect() : canvas.getBoundingClientRect();
     let baseWidth = rect.width || wrapper?.clientWidth || canvas.clientWidth || 320;
     let height = rect.height || wrapper?.clientHeight || canvas.clientHeight || 220;
 
-    // Если вкладка была скрыта при первом расчёте, берём безопасные минимальные размеры
     if (baseWidth < 50) baseWidth = 320;
     if (height < 50) height = 220;
 
-    // Используем уже рассчитанную ширину reqW для избежания сжатия столбцов
     const width = Math.max(baseWidth, reqW);
     canvas.style.width = width + "px";
     if (wrapper) {
@@ -693,7 +678,7 @@ function drawAutonomousChart(sessions, labels, ampData, smoothData, reqW = 320) 
     const chartW = width - padLeft - padRight;
     const chartH = height - padTop - padBottom;
 
-    // Горизонтальные линии сетки
+    // Grid lines
     ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
     ctx.lineWidth = 1;
     const maxVal = Math.max(200, ...ampData) * 1.15;
@@ -712,7 +697,7 @@ function drawAutonomousChart(sessions, labels, ampData, smoothData, reqW = 320) 
         ctx.fillText(val + "°", padLeft - 8, y + 4);
     }
 
-    // Отрисовка столбцов амплитуды
+    // Render amplitude bars
     const n = ampData.length;
     const slotW = chartW / n;
     const barW = Math.min(46, slotW * 0.55);
@@ -723,7 +708,6 @@ function drawAutonomousChart(sessions, labels, ampData, smoothData, reqW = 320) 
         const x = padLeft + i * slotW + (slotW - barW) / 2;
         const y = padTop + chartH - barH;
 
-        // Градиент столбца
         const grad = ctx.createLinearGradient(x, y, x, padTop + chartH);
         grad.addColorStop(0, "#00f2fe");
         grad.addColorStop(1, "rgba(0, 242, 254, 0.12)");
@@ -741,13 +725,11 @@ function drawAutonomousChart(sessions, labels, ampData, smoothData, reqW = 320) 
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        // Подпись значения над столбцом
         ctx.fillStyle = "#ffffff";
         ctx.font = "700 11px Inter, sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(val.toFixed(1) + "°", x + barW / 2, y - 6);
 
-        // Двухстрочная подпись оси X (Без наложений!)
         const labelItem = labels[i];
         if (Array.isArray(labelItem)) {
             const line1 = (labelItem[0] || "").substring(0, 10);
@@ -772,7 +754,7 @@ function drawAutonomousChart(sessions, labels, ampData, smoothData, reqW = 320) 
     }
 }
 
-// Удаление отдельной ошибочной записи (Система от дурака с кастомным модалом для Captive Portal)
+// Delete single session with custom confirmation modal
 function deleteSingleSession(filename, dateStr, patientId) {
     if (!filename) return;
     showCustomConfirm(
@@ -785,7 +767,7 @@ function deleteSingleSession(filename, dateStr, patientId) {
     );
 }
 
-// Умное клиентское скачивание CSV только для выбранного пациента или всех
+// Download filtered or global dataset as CSV with BOM for Excel compatibility
 function downloadFilteredCSV() {
     let filtered = allSessionsData;
     let fileName = "Rehab_All_Sessions.csv";
@@ -800,7 +782,6 @@ function downloadFilteredCSV() {
         return;
     }
 
-    // Заголовок CSV с BOM для корректного отображения кириллицы в Excel
     let csv = "\uFEFFІм'я Пацієнта,Дата і Час,Мінімальний кут (град),Максимальний кут (град),Амплітуда (град),Середня швидкість (град/с),Плавність (%),Кількість згинань,Час утримання (с)\r\n";
 
     filtered.forEach(rec => {
@@ -818,7 +799,7 @@ function downloadFilteredCSV() {
     document.body.removeChild(link);
 }
 
-// Кастомное модальное окно подтверждения (гарантированно работает в Captive Portal на iOS и Android)
+// Custom confirmation modal implementation (compatible with iOS and Android Captive Portal)
 function showCustomConfirm(title, text, okBtnText, onConfirm) {
     const modal = document.getElementById("customConfirmModal");
     if (!modal) {

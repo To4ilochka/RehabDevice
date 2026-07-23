@@ -1,7 +1,7 @@
 #include "WebServerModule.h"
 
-// Резервный встроенный HTML интерфейс (на случай, если файлы не загружены в LittleFS)
-static const char FALLBACK_HTML[] PROGMEM = R"rawliteral(
+// Fallback embedded HTML interface (in case /data files are not uploaded to LittleFS)
+static const char FALLBACK_HTML[] = R"rawliteral(
 <!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8"><title>RehabDevice</title>
 <style>body{background:#0a0e17;color:#fff;font-family:sans-serif;text-align:center;padding:50px;}
 .box{border:1px solid #00f2fe;padding:30px;border-radius:16px;max-width:500px;margin:0 auto;}
@@ -16,34 +16,26 @@ WebServerModule::WebServerModule(SensorMPU* sensorPtr, MemoryFS* fsPtr, Analytic
       lastStatusBroadcastMs(0), lastStatsBroadcastMs(0), lastCleanupMs(0), sendInitialStatusClientId(0) {}
 
 void WebServerModule::init() {
-    Serial.println("[WebServer] Инициализация Async Web Server и WebSocket...");
+    Serial.println("[WebServer] Initializing Async Web Server and WebSocket...");
 
-    // Настройка обработчиков WebSocket
     ws.onEvent([this](AsyncWebSocket* s, AsyncWebSocketClient* c, AwsEventType type, void* arg, uint8_t* d, size_t len) {
         this->onWsEvent(s, c, type, arg, d, len);
     });
     server.addHandler(&ws);
 
-    // Настройка маршрутов
     setupRoutes();
 
-    // Запуск сервера
     server.begin();
-    Serial.println("[WebServer] Веб-сервер успешно запущен на порту 80!");
+    Serial.println("[WebServer] HTTP Server started successfully on port 80!");
 }
 
 void WebServerModule::setupRoutes() {
-    // ================================================================
-    // ОСНОВНЫЕ МАРШРУТЫ
-    // ================================================================
-
-    // Главная страница (Captive portal или прямой доступ)
     auto serveIndex = [this](AsyncWebServerRequest *request) {
         Serial.printf("[HTTP] GET %s from %s Host: %s\n", request->url().c_str(), request->client()->remoteIP().toString().c_str(), request->host().c_str());
         if (LittleFS.exists("/index.html")) {
             request->send(LittleFS, "/index.html", "text/html");
         } else {
-            request->send_P(200, "text/html", FALLBACK_HTML);
+            request->send(200, "text/html", FALLBACK_HTML);
         }
     };
     server.on("/", HTTP_GET, serveIndex);
@@ -67,7 +59,6 @@ void WebServerModule::setupRoutes() {
         }
     });
 
-    // Экспорт статистики в CSV файл
     server.on("/download.csv", HTTP_GET, [this](AsyncWebServerRequest *request) {
         Serial.println("[HTTP] GET /download.csv");
         String csvData = memoryFS->generateCSV();
@@ -76,11 +67,6 @@ void WebServerModule::setupRoutes() {
         request->send(response);
     });
 
-    // ================================================================
-    // HTTP API
-    // ================================================================
-
-    // Статус системи: пам'ять, стан сесії, поточний кут
     server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
         Serial.println("[HTTP] GET /api/status");
         size_t total = memoryFS->getTotalBytes();
@@ -98,14 +84,12 @@ void WebServerModule::setupRoutes() {
         request->send(200, "application/json", buf);
     });
 
-    // Список сесій — повний JSON
     server.on("/api/sessions", HTTP_GET, [this](AsyncWebServerRequest *request) {
         Serial.println("[HTTP] GET /api/sessions");
         String json = memoryFS->getSessionsJSON();
         request->send(200, "application/json", json);
     });
 
-    // Виконання команд через HTTP GET
     server.on("/api/cmd", HTTP_GET, [this](AsyncWebServerRequest *request) {
         String action = request->hasArg("action") ? request->arg("action") : "";
         Serial.printf("[HTTP] GET /api/cmd?action=%s\n", action.c_str());
@@ -136,7 +120,7 @@ void WebServerModule::setupRoutes() {
         request->send(200, "application/json", "{\"ok\":true}");
     });
 
-    // Маршруты для перенаправления Captive Portal (Android / iOS / Windows)
+    // Captive Portal redirection routes (Android / iOS / Windows)
     server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest *request) {
         Serial.println("[HTTP] GET /generate_204 (captive portal redirect)");
         request->redirect("http://192.168.4.1/");
@@ -150,7 +134,7 @@ void WebServerModule::setupRoutes() {
         request->redirect("http://192.168.4.1/");
     });
 
-    // Обработчик 404 с автоматическим редиректом на Captive Portal или главную страницу (для /diag и старых ссылок)
+    // 404 handler with automatic redirection to Captive Portal or main page
     server.onNotFound([](AsyncWebServerRequest *request) {
         Serial.printf("[HTTP] 404/redirect: %s %s Host: %s\n", request->methodToString(), request->url().c_str(), request->host().c_str());
         if (!request->host().equalsIgnoreCase(WiFi.softAPIP().toString()) || !request->url().startsWith("/api/")) {
@@ -164,11 +148,10 @@ void WebServerModule::setupRoutes() {
 void WebServerModule::onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type,
                                 void* arg, uint8_t* data, size_t len) {
     if (type == WS_EVT_CONNECT) {
-        Serial.printf("[WebSocket] Клиент #%u подключился с IP: %s\n", client->id(), client->remoteIP().toString().c_str());
-        // Выставляем ID клиента для безопасной отправки начального статуса из цикла loop на Core 1
+        Serial.printf("[WebSocket] Client #%u connected from IP: %s\n", client->id(), client->remoteIP().toString().c_str());
         sendInitialStatusClientId = client->id();
     } else if (type == WS_EVT_DISCONNECT) {
-        Serial.printf("[WebSocket] Клиент #%u отключился\n", client->id());
+        Serial.printf("[WebSocket] Client #%u disconnected\n", client->id());
     } else if (type == WS_EVT_DATA) {
         handleWebSocketMessage(client, data, len);
     }
@@ -178,7 +161,7 @@ void WebServerModule::handleWebSocketMessage(AsyncWebSocketClient* client, uint8
     DynamicJsonDocument doc(1024);
     DeserializationError error = deserializeJson(doc, data, len);
     if (error) {
-        Serial.println("[WebSocket] Ошибка парсинга входящего JSON");
+        Serial.println("[WebSocket] Error parsing incoming JSON");
         return;
     }
 
@@ -189,7 +172,7 @@ void WebServerModule::handleWebSocketMessage(AsyncWebSocketClient* client, uint8
         if (unixTime > 1000000000UL) {
             struct timeval tv = { .tv_sec = (time_t)unixTime, .tv_usec = 0 };
             settimeofday(&tv, NULL);
-            Serial.printf("[WebServer] Время синхронизировано через WebSocket: %lu\n", unixTime);
+            Serial.printf("[WebServer] Time synchronized via WebSocket: %lu\n", unixTime);
         }
     } else if (cmd == "startSession") {
         String patientId = doc["patientId"].as<String>();
@@ -252,11 +235,10 @@ void WebServerModule::broadcastLiveStats() {
     if (!analytics->isSessionActive() || ws.count() == 0) return;
 
     unsigned long now = millis();
-    if (now - lastStatsBroadcastMs < 200) return; // Обновление живой статистики 5 раз в секунду
+    if (now - lastStatsBroadcastMs < 200) return; // Update live stats 5 times per second
     lastStatsBroadcastMs = now;
 
     String liveJson = analytics->getLiveStatsJSON();
-    // Внедряем поле type
     liveJson.replace("{\"active\"", "{\"type\":\"liveStats\",\"active\"");
     ws.textAll(liveJson);
 }
@@ -270,7 +252,7 @@ void WebServerModule::sendSessionsList(AsyncWebSocketClient* client) {
 }
 
 void WebServerModule::update() {
-    // 1. Отправка начального статуса новому подключившемуся клиенту с Core 1 (без блокировки Core 0 / LwIP)
+    // 1. Send initial status to newly connected client from Core 1
     if (sendInitialStatusClientId != 0) {
         AsyncWebSocketClient* client = ws.client(sendInitialStatusClientId);
         if (client && client->status() == WS_CONNECTED) {
@@ -283,7 +265,7 @@ void WebServerModule::update() {
         }
     }
 
-    // 2. Пошаговая (ровно один чанк за один проход loop) неблокирующая выдача сессий
+    // 2. Step-by-step non-blocking streaming of patient sessions (one chunk per loop)
     if (!streamState.active) return;
 
     AsyncWebSocketClient* client = nullptr;
@@ -294,8 +276,6 @@ void WebServerModule::update() {
             return;
         }
         if (!client->canSend()) {
-            // Сокет LwIP прямо сейчас отправляет предыдущий пакет в Wi-Fi эфир.
-            // МГНОВЕННО выходим из update() обратно в loop(), гарантируя 0 мс задержки MPU6050!
             return;
         }
     }
@@ -315,7 +295,6 @@ void WebServerModule::update() {
         if (client) client->text(chunkJson); else ws.textAll(chunkJson);
         streamState.currentPatientIdx++;
     } else {
-        // Все пациенты и их сессии выданы
         char endBuf[128];
         snprintf(endBuf, sizeof(endBuf), "{\"type\":\"sessionsStreamEnd\",\"totalSent\":%u}", (unsigned int)streamState.currentPatientIdx);
         if (client) client->text(endBuf); else ws.textAll(endBuf);

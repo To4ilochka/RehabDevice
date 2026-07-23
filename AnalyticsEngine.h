@@ -7,7 +7,7 @@
 #include "MemoryFS.h"
 #include "Config.h"
 
-// Текущее состояние адаптивного детектора крайних точек
+// Current state of the adaptive extreme points detector
 enum HysteresisState {
     STATE_NEUTRAL = 0,
     STATE_SEARCHING_MAX,
@@ -18,25 +18,25 @@ class AnalyticsEngine {
 public:
     AnalyticsEngine();
     
-    // Начало новой сессии отслеживания для конкретного пациента
+    // Start tracking session for a specific patient
     void startSession(const String& patientName);
     
-    // Завершение сессии и сохранение в LittleFS
+    // Stop tracking session and save record to LittleFS
     bool stopSession(MemoryFS* fs);
     
-    // Обработка новой порции данных от датчика (вызывается из loop при каждом обновлении)
+    // Process new sensor data sample (called from main loop on data update)
     void processData(const MPUData& data);
     
-    // Проверка, активна ли сессия
+    // Check if a session is currently active
     bool isSessionActive() const;
     
-    // Получение текущей статистики в виде JSON (для отправки по WebSocket)
+    // Get live session statistics as JSON string for WebSocket broadcast
     String getLiveStatsJSON();
     
-    // Получение текущей записи статистики в виде структуры
+    // Get current session record structure
     SessionRecord getCurrentRecord() const;
     
-    // Сброс статистики
+    // Reset internal statistical counters
     void reset();
 
 private:
@@ -46,29 +46,29 @@ private:
     unsigned long sessionStartUnix;
     unsigned long lastUpdateMs;
 
-    // Метрики углов
+    // Angle metrics
     float minAngle;
     float maxAngle;
     float currentAngle;
     
-    // Метрики скорости
+    // Speed metrics
     float totalSpeedSum;
     unsigned long speedSamplesCount;
     float lastGyroDegS;
     
-    // Метрики плавности и тремора
+    // Smoothness and tremor metrics
     unsigned long tremorSpikesCount;
     float smoothnessScore;
     
-    // Детектор сгибаний (гистерезис)
+    // Flexions hysteresis detector
     HysteresisState hystState;
     float localExtremeAngle;
     int flexionsCount;
     
-    // Время удержания в крайних точках
+    // Holding time at extreme angles
     float totalHoldingTimeSec;
     
-    // Вспомогательный метод для получения текущего форматированного времени
+    // Helper method to get formatted date/time string
     String getFormattedDateTime();
 };
 

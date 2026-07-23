@@ -4,14 +4,14 @@
 #include <Arduino.h>
 
 // ============================================================================
-// НАСТРОЙКИ АППАРАТНЫХ ПИНОВ (ESP-WROOM-32)
+// HARDWARE PIN SETTINGS (ESP-WROOM-32)
 // ============================================================================
 #define PIN_I2C_SDA             21
 #define PIN_I2C_SCL             22
-#define PIN_MPU_INT             19  // Пины для аппаратного прерывания от MPU6050 (INT)
+#define PIN_MPU_INT             19  // Hardware interrupt pin from MPU6050 (INT)
 
 // ============================================================================
-// НАСТРОЙКИ WI-FI SOFTAP И CAPTIVE PORTAL
+// WI-FI SOFTAP AND CAPTIVE PORTAL SETTINGS
 // ============================================================================
 #define WIFI_AP_SSID            "RehabDevice_AP"
 #define WIFI_AP_PASSWORD        "rehab1234"
@@ -22,35 +22,31 @@
 #define DNS_SERVER_PORT         53
 
 // ============================================================================
-// НАСТРОЙКИ ВЕБ-СОКЕТОВ И ПОТОКА ДАННЫХ
+// WEBSOCKET AND DATA STREAMING SETTINGS
 // ============================================================================
-// Интервал отправки данных в веб-интерфейс (33 мс = ~30 FPS для плавного вращения круга)
+// Interval for broadcasting data to UI (33 ms = ~30 FPS for smooth circle animation)
 #define WS_BROADCAST_INTERVAL_MS 33
-// Интервал обновления информации о памяти и состоянии (секунды)
+// Interval for broadcasting memory status and active state (milliseconds)
 #define STATUS_UPDATE_INTERVAL_MS 2000
 
 // ============================================================================
-// НАСТРОЙКИ АНАЛИТИЧЕСКОГО ДВИЖКА (ANALYTICS ENGINE)
+// ANALYTICS ENGINE SETTINGS
 // ============================================================================
-// Минимальное изменение угла для фиксации начала/конца сгибания (гистерезис)
+// Minimum angle change to trigger start/end of a flexion (hysteresis threshold)
 #define ANALYTICS_HYSTERESIS_DEG          4.0f
-// Порог углового ускорения (d^2(theta)/dt^2) в град/сек^2 для детекции тремора и рывков
+// Angular acceleration threshold (d^2(theta)/dt^2) in deg/s^2 for tremor and jerk detection
 #define ANALYTICS_TREMOR_JERK_THRESHOLD   180.0f
-// Допустимое отклонение от пикового угла для подсчета времени удержания в крайней точке
+// Tolerable deviation from peak angle for holding time calculation
 #define ANALYTICS_HOLD_TOLERANCE_DEG      3.5f
-// Максимальная угловая скорость (град/сек), при которой кисть считается неподвижной в точке удержания
+// Maximum angular velocity (deg/s) below which wrist is considered holding at extreme point
 #define ANALYTICS_HOLD_MAX_SPEED_DEG_S    6.0f
 
 // ============================================================================
-// НАСТРОЙКИ ФАЙЛОВОЙ СИСТЕМЫ И ЦИКЛИЧЕСКОГО БУФЕРА (LITTLEFS)
+// LITTLEFS AND STORAGE SETTINGS
 // ============================================================================
-// Минимальный запас свободной памяти (в байтах), при падении ниже которого удаляются старые сессии (100 КБ)
+// Minimum free memory reserve (in bytes); older sessions are deleted when below this limit (100 KB)
 #define FS_MIN_FREE_BYTES                 (100 * 1024)
-// Максимальное количество сессий в индексе (защита от переполнения списка файлов)
-#define FS_MAX_SESSIONS                   250
-// Имя файла индекса сессий
-#define FS_SESSIONS_INDEX_FILE            "/p_index.json"
-// Директория для хранения попациентных файлов (.jsonl)
+// Directory for storing per-patient session files (.jsonl)
 #define FS_SESSIONS_DIR                   "/p"
 
 #endif // CONFIG_H

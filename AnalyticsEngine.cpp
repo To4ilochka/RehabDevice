@@ -28,11 +28,11 @@ void AnalyticsEngine::startSession(const String& patientName) {
     sessionStartTimeMs = millis();
     lastUpdateMs = millis();
     
-    // Получение текущего UNIX времени с системных часов ESP32
+    // Get current UNIX time from ESP32 system RTC
     time_t now = time(nullptr);
     sessionStartUnix = (now > 1000000) ? now : (sessionStartTimeMs / 1000);
     
-    Serial.printf("[AnalyticsEngine] Старт сессии для пациента '%s', время: %s\n", 
+    Serial.printf("[AnalyticsEngine] Session started for patient '%s', time: %s\n", 
                   patientId.c_str(), getFormattedDateTime().c_str());
 }
 
@@ -42,7 +42,7 @@ bool AnalyticsEngine::stopSession(MemoryFS* fs) {
     SessionRecord record = getCurrentRecord();
     sessionActive = false;
 
-    Serial.printf("[AnalyticsEngine] Завершение сессии. Сгибаний: %d, Плавность: %.1f%%, Удержание: %.1f с\n", 
+    Serial.printf("[AnalyticsEngine] Session stopped. Flexions: %d, Smoothness: %.1f%%, Holding: %.1f s\n", 
                   record.flexionsCount, record.smoothness, record.holdingTime);
 
     if (fs) {
@@ -56,57 +56,53 @@ void AnalyticsEngine::processData(const MPUData& data) {
 
     unsigned long nowMs = millis();
     float dt = (nowMs - lastUpdateMs) / 1000.0f;
-    if (dt <= 0.0001f) return; // Защита от деления на ноль при слишком частых вызовах
+    if (dt <= 0.0001f) return; // Prevent division by zero if called too frequently
     lastUpdateMs = nowMs;
 
-    // В качестве основного угла поворота кисти используем крен (roll), либо наклон (pitch)
+    // Use wrist roll angle as primary movement metric
     currentAngle = data.roll;
 
-    // Обновление глобального минимума и максимума за сессию
+    // Update session global minimum and maximum
     if (currentAngle < minAngle) minAngle = currentAngle;
     if (currentAngle > maxAngle) maxAngle = currentAngle;
 
-    // Расчет средней скорости (по модулю вектора угловой скорости гироскопа)
+    // Calculate angular velocity magnitude from gyro axes
     float currentSpeed = sqrt(data.gyroX * data.gyroX + data.gyroY * data.gyroY + data.gyroZ * data.gyroZ);
     totalSpeedSum += currentSpeed;
     speedSamplesCount++;
 
-    // Детекция тремора / резких рывков (по угловому ускорению d(omega)/dt)
+    // Detect tremor and sudden jerks via angular acceleration d(omega)/dt
     float angularJerk = fabs(currentSpeed - lastGyroDegS) / dt;
     lastGyroDegS = currentSpeed;
 
     if (angularJerk > ANALYTICS_TREMOR_JERK_THRESHOLD) {
         tremorSpikesCount++;
-        // Плавность уменьшается с каждым резким рывком/тремором
         smoothnessScore = max(0.0f, 100.0f - (tremorSpikesCount * 1.5f));
     }
 
-    // Адаптивный детектор сгибаний с гистерезисом
+    // Adaptive flexions detector with hysteresis
     if (hystState == STATE_NEUTRAL) {
         localExtremeAngle = currentAngle;
         hystState = STATE_SEARCHING_MAX;
     } else if (hystState == STATE_SEARCHING_MAX) {
         if (currentAngle > localExtremeAngle) {
-            localExtremeAngle = currentAngle; // Обновляем локальный максимум
+            localExtremeAngle = currentAngle; // Update local peak
         } else if (currentAngle < localExtremeAngle - ANALYTICS_HYSTERESIS_DEG) {
-            // Угол упал ниже порога гистерезиса относительно максимума — фиксируем вершину
             flexionsCount++;
             localExtremeAngle = currentAngle;
             hystState = STATE_SEARCHING_MIN;
         }
     } else if (hystState == STATE_SEARCHING_MIN) {
         if (currentAngle < localExtremeAngle) {
-            localExtremeAngle = currentAngle; // Обновляем локальный минимум
+            localExtremeAngle = currentAngle; // Update local valley
         } else if (currentAngle > localExtremeAngle + ANALYTICS_HYSTERESIS_DEG) {
-            // Угол вырос выше порога гистерезиса относительно минимума — фиксируем дно
             flexionsCount++;
             localExtremeAngle = currentAngle;
             hystState = STATE_SEARCHING_MAX;
         }
     }
 
-    // Подсчет времени удержания в крайних точках
-    // (если кисть находится в пределах допуска возле локального экстремума и скорость мала)
+    // Calculate holding time at extreme points
     if (fabs(currentAngle - localExtremeAngle) <= ANALYTICS_HOLD_TOLERANCE_DEG && 
         currentSpeed <= ANALYTICS_HOLD_MAX_SPEED_DEG_S) {
         totalHoldingTimeSec += dt;
@@ -153,7 +149,6 @@ String AnalyticsEngine::getLiveStatsJSON() {
 String AnalyticsEngine::getFormattedDateTime() {
     time_t now = time(nullptr);
     if (now < 1000000) {
-        // Если время еще не синхронизировано, возвращаем время со старта в секундах
         unsigned long elapsedSec = (millis() - sessionStartTimeMs) / 1000;
         return "Сесія (+" + String(elapsedSec) + " с)";
     }

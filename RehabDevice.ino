@@ -6,14 +6,14 @@
 #include "WiFiManagerModule.h"
 #include "WebServerModule.h"
 
-// Создание глобальных экземпляров модулей прошивки
+// Global firmware module instances
 SensorMPU sensor;
 MemoryFS memoryFS;
 AnalyticsEngine analytics;
 WiFiManagerModule wifiManager;
 WebServerModule webServer(&sensor, &memoryFS, &analytics, &wifiManager);
 
-// Таймер для периодической отправки данных угла (30 FPS)
+// Timer for periodic angle broadcast (~30 FPS)
 unsigned long lastWsBroadcastMs = 0;
 
 void setup() {
@@ -21,64 +21,64 @@ void setup() {
     delay(500);
 
     Serial.println("====================================================================");
-    Serial.println("  RehabDevice — Система мониторинга реабилитации кисти (ESP32)");
+    Serial.println("  RehabDevice — Wrist Rehabilitation Monitoring System (ESP32)");
     Serial.println("====================================================================");
 
-    // 1. Инициализация внутренней памяти и файловой системы LittleFS
+    // 1. Initialize LittleFS storage and memory management
     if (!memoryFS.init()) {
-        Serial.println("[Setup] Ошибка: Не удалась инициализация MemoryFS!");
+        Serial.println("[Setup] Error: Failed to initialize MemoryFS!");
     }
 
-    // 2. Инициализация гироскопа/акселерометра MPU6050 (DMP + прерывания INT)
+    // 2. Initialize MPU6050 gyroscope/accelerometer (DMP + INT interrupts)
     if (!sensor.init()) {
-        Serial.println("[Setup] ВНИМАНИЕ: MPU6050 не инициализирован! Проверьте подключение.");
+        Serial.println("[Setup] WARNING: MPU6050 not initialized! Check wiring and connections.");
     }
 
-    // 3. Инициализация Wi-Fi точки доступа и Captive Portal DNS сервера
+    // 3. Initialize Wi-Fi Access Point and Captive Portal DNS server
     if (!wifiManager.init()) {
-        Serial.println("[Setup] Ошибка: Не удалась инициализация WiFiManager!");
+        Serial.println("[Setup] Error: Failed to initialize WiFiManager!");
     }
 
-    // 4. Запуск асинхронного веб-сервера и WebSockets
+    // 4. Start asynchronous HTTP server and WebSockets
     webServer.init();
 
     Serial.println("====================================================================");
-    Serial.println("  Система готова к работе! Подключитесь к Wi-Fi 'RehabDevice_AP'");
+    Serial.println("  System ready! Connect to Wi-Fi network 'RehabDevice_AP'");
     Serial.println("====================================================================");
 }
 
 void loop() {
-    // 1. Чтение пакетов из FIFO буфера датчика по аппаратному прерыванию без блокировки
+    // 1. Read FIFO packets from sensor via hardware interrupt without blocking
     sensor.update();
 
-    // 2. Обслуживание DNS-запросов для работы Captive Portal
+    // 2. Process DNS requests for Captive Portal
     wifiManager.update();
 
-    // 3. Очистка отключенных клиентов WebSocket и обработка очереди потоковой выдачи сессий
+    // 3. Clean up disconnected WebSocket clients and process non-blocking session stream queue
     webServer.cleanupClients();
     webServer.update();
 
-    // 4. Получение новых данных датчика и расчет аналитики
+    // 4. Retrieve sensor data and compute analytics
     if (sensor.isReady()) {
         MPUData data = sensor.getData();
         if (data.dataUpdated) {
-            // Передаем углы и скорости в аналитический движок для детекции тремора и сгибаний
+            // Pass angles and velocities to analytics engine for tremor and flexion detection
             analytics.processData(data);
 
-            // Отправка данных на фронтенд с заданной частотой (33 мс = ~30 Гц)
+            // Broadcast real-time data to frontend (~30 FPS)
             unsigned long now = millis();
             if (now - lastWsBroadcastMs >= WS_BROADCAST_INTERVAL_MS) {
                 lastWsBroadcastMs = now;
                 
-                // Трансляция текущего угла поворота кисти (крен / roll) на круг в браузере
+                // Broadcast current wrist roll angle for visual feedback in browser
                 webServer.broadcastAngle(data.roll);
                 
-                // Трансляция живой аналитики, если идет активная сессия пациента
+                // Broadcast live training metrics if a patient session is active
                 webServer.broadcastLiveStats();
             }
         }
     }
 
-    // Периодическая рассылка информации о статусе и памяти
+    // Periodic status and memory usage broadcast
     webServer.broadcastStatus();
 }

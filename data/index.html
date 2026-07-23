@@ -33,7 +33,7 @@
     </header>
 
     <main>
-        <!-- Навігація по вкладках -->
+        <!-- Tab navigation -->
         <nav class="tabs-nav">
             <button class="tab-btn active" data-tab="tabPatient">
                 <span>🧘 Тренування та Моніторинг</span>
@@ -43,16 +43,16 @@
             </button>
         </nav>
 
-        <!-- Вкладка 1: Пацієнт та реальний режим -->
+        <!-- Tab 1: Patient monitoring and real-time visualizer -->
         <section class="tab-content active" id="tabPatient">
             <div class="grid-2">
-                <!-- Ліва колонка: Панель керування та авторизації -->
+                <!-- Left column: Authorization and control panel -->
                 <div class="card auth-panel">
                     <div class="card-header">
                         <div class="card-title">🔐 Авторизація Сесії</div>
                     </div>
 
-                    <!-- Панель гостя (до авторизації) -->
+                    <!-- Guest mode panel (before authorization) -->
                     <div id="authGuestPanel" style="display: flex; flex-direction: column; gap: 1rem;">
                         <div class="input-group">
                             <label for="patientIdInput">ПІБ / ID Пацієнта</label>
@@ -64,7 +64,7 @@
                         </p>
                     </div>
 
-                    <!-- Панель активного пацієнта -->
+                    <!-- Active patient session panel -->
                     <div id="authActivePanel" style="display: none; flex-direction: column; gap: 1rem;">
                         <div style="padding: 1rem; background: rgba(0, 230, 118, 0.1); border: 1px solid rgba(0, 230, 118, 0.3); border-radius: 12px;">
                             <span style="font-size: 0.8rem; color: var(--text-secondary);">Активна сесія пацієнта:</span>
@@ -75,14 +75,14 @@
 
                     <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 0.5rem 0;">
 
-                    <!-- Калібрування датчика -->
+                    <!-- Sensor zero-position calibration -->
                     <div class="input-group">
                         <label>Миттєве калібрування нульової позиції</label>
                         <button class="btn btn-secondary" id="btnRecalibrate">🎯 Рекалібрування 0° на льоту</button>
                     </div>
                 </div>
 
-                <!-- Права колонка: Інтерактивне коло (Кут нахилу) -->
+                <!-- Right column: Interactive angle visualizer -->
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title">🔄 Динамічна візуалізація кута кисті</div>
@@ -93,7 +93,7 @@
                             <div class="circle-indicator" id="circleIndicator">
                                 <div class="circle-crosshair"></div>
                                 <div class="circle-crosshair vert"></div>
-                                <!-- Оранжева стрілка напрямку повороту кисті -->
+                                <!-- Orange arrow indicating wrist flexion angle -->
                                 <div class="circle-arrow">
                                     <svg viewBox="0 0 44 110" class="arrow-svg">
                                         <defs>
@@ -106,11 +106,11 @@
                                                 <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ff9100" flood-opacity="0.85" />
                                             </filter>
                                         </defs>
-                                        <!-- Світловий промінь від центру осі обертання вгору -->
+                                        <!-- Light beam from center rotation axis upwards -->
                                         <path d="M19,110 L25,110 L25,30 L19,30 Z" fill="url(#arrowGrad)" />
-                                        <!-- Оранжевий наконечник стрілки (точково спрямований до обідка) -->
+                                        <!-- Orange arrow tip pointing to circle rim -->
                                         <path d="M9,32 L22,6 L35,32 Z" fill="#ff9100" filter="url(#arrowGlow)" />
-                                        <!-- Центральна куля осі обертання -->
+                                        <!-- Center rotation pivot circle -->
                                         <circle cx="22" cy="110" r="5" fill="#ff9100" filter="url(#arrowGlow)" />
                                     </svg>
                                 </div>
@@ -124,7 +124,7 @@
                 </div>
             </div>
 
-            <!-- Жива аналітика (відображається лише при авторизації пацієнта) -->
+            <!-- Real-time analytics panel (shown when patient is authorized) -->
             <div class="card" id="liveStatsPanel" style="display: none;">
                 <div class="card-header">
                     <div class="card-title">📊 Розширена аналітика в реальному часі</div>
@@ -158,7 +158,7 @@
             </div>
         </section>
 
-        <!-- Вкладка 2: Інтерфейс Лікаря -->
+        <!-- Tab 2: Doctor Dashboard (Statistics) -->
         <section class="tab-content" id="tabDoctor">
             <div class="card">
                 <div class="card-header" style="flex-wrap: wrap; gap: 1rem;">
@@ -172,12 +172,12 @@
                     </div>
                 </div>
 
-                <!-- Інтерактивна стрічка тегів (пілсів) з іменами пацієнтів замість випадаючого списку -->
+                <!-- Interactive patient selection pills instead of dropdown -->
                 <div id="patientPillsContainer" class="patient-pills-strip" style="display: flex; gap: 0.5rem; overflow-x: auto; padding: 0.5rem 0 1.25rem 0; scrollbar-width: thin;">
                     <button class="patient-pill active" data-patient="ALL">🧑 Всі пацієнти</button>
                 </div>
 
-                <!-- Зведена аналітика щодо обраного пацієнта (З'являється при виборі конкретного ПІБ) -->
+                <!-- Clinical course summary for selected patient -->
                 <div id="patientSummaryContainer" class="patient-summary-box" style="display: none; margin-bottom: 1.75rem;">
                     <div class="summary-header">
                         <div>
@@ -197,7 +197,7 @@
                         </div>
                     </div>
 
-                    <!-- Блок цільової норми та функціонального відновлення -->
+                    <!-- Target norm and functional recovery calculation -->
                     <div style="margin: 1rem 0; padding: 0.85rem 1rem; background: rgba(0,0,0,0.25); border-radius: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; border: 1px solid rgba(255,255,255,0.06);">
                         <div style="display: flex; align-items: center; gap: 0.75rem;">
                             <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">🎯 Цільова норма суглоба:</span>
@@ -268,7 +268,7 @@
         </section>
     </main>
 
-    <!-- Кастомне модальне вікно підтвердження (гарантовано працює в Captive Portal iOS/Android) -->
+    <!-- Custom confirmation modal overlay (iOS/Android Captive Portal compatible) -->
     <div id="customConfirmModal" class="custom-modal-overlay">
         <div class="custom-modal-box">
             <div id="customConfirmIcon" class="custom-modal-icon">⚠️</div>

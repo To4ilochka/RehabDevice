@@ -16,28 +16,28 @@ class WebServerModule {
 public:
     WebServerModule(SensorMPU* sensorPtr, MemoryFS* fsPtr, AnalyticsEngine* analyticsPtr, WiFiManagerModule* wifiPtr);
     
-    // Инициализация маршрутов веб-сервера и WebSocket
+    // Initialize HTTP server routes and WebSocket handlers
     void init();
     
-    // Отправка текущего угла поворота всем подключенным клиентам (в реальном времени)
+    // Broadcast real-time wrist angle to all connected WebSocket clients
     void broadcastAngle(float angle);
     
-    // Отправка информации об использовании памяти, клиентах и состоянии сессии
+    // Broadcast memory usage, connected clients count, and session recording status
     void broadcastStatus();
     
-    // Отправка живой статистики текущей сессии
+    // Broadcast live training statistics for current session
     void broadcastLiveStats();
     
-    // Отправка списка сессий для построения графиков
+    // Send patient sessions list chunk by chunk to avoid RAM exhaustion
     void sendSessionsList(AsyncWebSocketClient* client = nullptr);
 
-    // Регулярный вызов из основного цикла loop() для безопасной отправки потоковых чанков на Core 1
+    // Regular update called from loop() to process non-blocking chunked streaming on Core 1
     void update();
 
-    // Отправка информации о статусе конкретному подключившемуся клиенту
+    // Send initial status payload to newly connected client
     void sendStatusToClient(AsyncWebSocketClient* client);
 
-    // Обработчик очистки неактивных клиентов WebSocket
+    // Clean up disconnected or timed out WebSocket clients
     void cleanupClients();
 
 private:
@@ -62,12 +62,10 @@ private:
     StreamState streamState;
     uint32_t sendInitialStatusClientId;
 
-    // Внутренние обработчики событий WebSocket
     void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type,
                    void* arg, uint8_t* data, size_t len);
     void handleWebSocketMessage(AsyncWebSocketClient* client, uint8_t* data, size_t len);
 
-    // Обработчик Captive Portal и несуществующих страниц
     void setupRoutes();
 };
 
