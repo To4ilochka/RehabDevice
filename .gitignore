@@ -28,3 +28,6 @@ scripts/*
 
 # Article drafts (local only)
 paper/
+# Python cache
+__pycache__/
+*.py[cod]
