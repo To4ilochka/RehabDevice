@@ -1,4 +1,5 @@
 #include "SensorMPU.h"
+#include "AngleMath.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -16,9 +17,13 @@ void IRAM_ATTR SensorMPU::dmpDataReadyISR() {
 
 SensorMPU::SensorMPU() : dmpReady(false), mpuIntStatus(0), devStatus(0), packetSize(0), fifoCount(0),
                          pitchOffset(0.0f), rollOffset(0.0f), yawOffset(0.0f),
+                         dataMutex(nullptr), mutexMissCount(0),
                          calState(CAL_IDLE), calWaitStartTime(0) {
     memset(&currentData, 0, sizeof(currentData));
     dataMutex = xSemaphoreCreateMutex();
+    if (dataMutex == nullptr) {
+        Serial.println("[SensorMPU] FATAL: Failed to create data mutex!");
+    }
 }
 
 bool SensorMPU::init() {
@@ -110,7 +115,7 @@ void SensorMPU::update() {
         mpu.dmpGetGravity(&tempGravity, &tempQ);
         mpu.dmpGetYawPitchRoll(tempYPR, &tempQ, &tempGravity);
 
-        if (isnan(tempYPR[0]) || isnan(tempYPR[1]) || isnan(tempYPR[2])) {
+        if (!isfinite(tempYPR[0]) || !isfinite(tempYPR[1]) || !isfinite(tempYPR[2])) {
             mpu.resetFIFO();
             calState = CAL_IDLE;
             return;
@@ -160,16 +165,16 @@ void SensorMPU::update() {
             float rawPitch = ypr[1] * 180.0f / M_PI;
             float rawRoll = ypr[2] * 180.0f / M_PI;
 
-            if (isnan(rawRoll) || isnan(rawPitch) || isnan(rawYaw)) {
+            if (!isfinite(rawRoll) || !isfinite(rawPitch) || !isfinite(rawYaw)) {
                 mpu.resetFIFO();
                 fifoCount = 0;
                 return;
             }
 
-            if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(2)) == pdTRUE) {
-                currentData.yaw = rawYaw - yawOffset;
-                currentData.pitch = rawPitch - pitchOffset;
-                currentData.roll = rawRoll - rollOffset;
+            if (dataMutex != nullptr && xSemaphoreTake(dataMutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+                currentData.yaw = normalizeAngleDifference(rawYaw - yawOffset);
+                currentData.pitch = normalizeAngleDifference(rawPitch - pitchOffset);
+                currentData.roll = normalizeAngleDifference(rawRoll - rollOffset);
 
                 // Convert gyro to deg/sec (131 LSB/deg/s) and accel to g (16384 LSB/g)
                 currentData.gyroX = gx / 131.0f;
@@ -183,6 +188,8 @@ void SensorMPU::update() {
                 currentData.dataUpdated = true;
                 currentData.timestamp = millis();
                 xSemaphoreGive(dataMutex);
+            } else if (dataMutex != nullptr) {
+                __atomic_add_fetch(&mutexMissCount, 1, __ATOMIC_RELAXED);
             }
         }
     }
@@ -203,10 +210,12 @@ bool SensorMPU::recalibrate() {
 MPUData SensorMPU::getData() {
     MPUData result;
     memset(&result, 0, sizeof(result));
-    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+    if (dataMutex != nullptr && xSemaphoreTake(dataMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
         result = currentData;
         currentData.dataUpdated = false;
         xSemaphoreGive(dataMutex);
+    } else if (dataMutex != nullptr) {
+        __atomic_add_fetch(&mutexMissCount, 1, __ATOMIC_RELAXED);
     }
     return result;
 }
@@ -214,13 +223,19 @@ MPUData SensorMPU::getData() {
 MPUData SensorMPU::peekData() {
     MPUData result;
     memset(&result, 0, sizeof(result));
-    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+    if (dataMutex != nullptr && xSemaphoreTake(dataMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
         result = currentData;
         xSemaphoreGive(dataMutex);
+    } else if (dataMutex != nullptr) {
+        __atomic_add_fetch(&mutexMissCount, 1, __ATOMIC_RELAXED);
     }
     return result;
 }
 
 bool SensorMPU::isReady() const {
     return dmpReady;
+}
+
+uint32_t SensorMPU::getMutexMissCount() const {
+    return __atomic_load_n(&mutexMissCount, __ATOMIC_RELAXED);
 }
