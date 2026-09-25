@@ -23,7 +23,8 @@ data_gz/
 data_src_temp/
 
 # Python scripts
-scripts/
+scripts/*
+!scripts/check_static_assets.py
 
 # Article drafts (local only)
 paper/

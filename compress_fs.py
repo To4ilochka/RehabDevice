@@ -2,6 +2,7 @@ Import("env")
 import os
 import shutil
 import gzip
+from SCons.Script import COMMAND_LINE_TARGETS
 
 project_dir = env.subst("$PROJECT_DIR")
 data_dir = os.path.join(project_dir, "data")
@@ -11,7 +12,7 @@ compressed_data_dir = os.path.join(build_dir, "data_compressed")
 # Tell PlatformIO to use the compressed directory for LittleFS
 env.Replace(PROJECT_DATA_DIR=compressed_data_dir)
 
-def before_buildfs(source, target, env):
+def prepare_filesystem():
     print("\n[Auto-GZIP] Preparing compressed data directory...")
     
     if os.path.exists(compressed_data_dir):
@@ -30,17 +31,12 @@ def before_buildfs(source, target, env):
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             
             if is_compressible:
-                with open(orig_path, "rb") as f_in, gzip.open(dest_path, "wb") as f_out:
+                with open(orig_path, "rb") as f_in, open(dest_path, "wb") as compressed_file, gzip.GzipFile(filename="", mode="wb", fileobj=compressed_file, mtime=0) as f_out:
                     shutil.copyfileobj(f_in, f_out)
             else:
                 shutil.copy2(orig_path, dest_path)
                 
     print("[Auto-GZIP] Compression complete.\n")
 
-# Hook into the LittleFS build process
-env.AddPreAction("$BUILD_DIR/littlefs.bin", before_buildfs)
-
-# Tell SCons that littlefs.bin depends on the original data directory.
-# This ensures that changing a file in 'data' will trigger the buildfs target
-# and execute our before_buildfs script automatically, without needing 'pio clean'.
-env.Depends("$BUILD_DIR/littlefs.bin", data_dir)
+if set(COMMAND_LINE_TARGETS) & {"buildfs", "uploadfs", "uploadfsota"}:
+    prepare_filesystem()
