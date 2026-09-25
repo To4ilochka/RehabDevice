@@ -1,7 +1,6 @@
 #include "WebServerModule.h"
 #include <LittleFS.h>
 #include "DatabaseManager.h"
-#include "DatabaseManager.h"
 #include <ElegantOTA.h>
 #include "SystemCommands.h"
 
@@ -20,16 +19,6 @@ h1{color:#ff4c4c;}</style></head>
 WebServerModule::WebServerModule(SensorMPU* sensorPtr, AnalyticsEngine* analyticsPtr, WiFiManagerModule* wifiPtr)
     : server(WEB_SERVER_PORT), ws("/ws"), sensor(sensorPtr), analytics(analyticsPtr), wifi(wifiPtr),
       lastStatusBroadcastMs(0), lastStatsBroadcastMs(0), lastCleanupMs(0), sendInitialStatusClientId(0) {}
-
-static String getContentType(const String& path) {
-    if (path.endsWith(".html") || path.endsWith(".htm")) return "text/html";
-    if (path.endsWith(".css")) return "text/css";
-    if (path.endsWith(".js")) return "application/javascript";
-    if (path.endsWith(".png")) return "image/png";
-    if (path.endsWith(".json")) return "application/json";
-    if (path.endsWith(".svg")) return "image/svg+xml";
-    return "text/plain";
-}
 
 void WebServerModule::init() {
     Serial.println("[WebServer] Initializing Async Web Server and WebSocket...");
@@ -61,7 +50,7 @@ public:
 
     ~AsyncChunkedSessionsResponse() {
         if (_stmt) {
-            sqlite3_finalize(_stmt);
+            dbManager.finalizeStatement(_stmt);
             _stmt = nullptr;
         }
     }
@@ -107,7 +96,7 @@ public:
 
             if (_isDone) break;
 
-            int rc = sqlite3_step(_stmt);
+            int rc = dbManager.stepStatement(_stmt);
             
             if (rc == SQLITE_ROW) {
                 JsonDocument doc;
@@ -158,10 +147,13 @@ void WebServerModule::setupRoutes() {
         doc["patientId"] = rec.patientId;
         doc["angle"] = serialized(String(mpu.roll, 2));
         doc["sdAvailable"] = dbManager.isSDAvailable();
+        doc["sensorMutexMisses"] = sensor->getMutexMissCount();
         
         String response;
         serializeJson(doc, response);
+    #ifdef DEBUG_VERBOSE
         Serial.printf("[WebServer] /api/status requested. Free heap: %u\n", ESP.getFreeHeap());
+    #endif
         request->send(200, "application/json", response);
     });
 
@@ -220,32 +212,35 @@ void WebServerModule::setupRoutes() {
             }
         } else if (action == "reboot") {
             request->send(200, "application/json", "{\"ok\":true}");
-            delay(500);
-            ESP.restart();
+            // Defer restart to a short-lived task so this AsyncTCP callback isn't blocked
+            xTaskCreate([](void*) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                ESP.restart();
+            }, "RebootTask", 2048, NULL, 1, NULL);
             return;
         }
         request->send(200, "application/json", "{\"ok\":true}");
     });
 
 
-    server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-    server.serveStatic("/games", LittleFS, "/games/");
+    server.serveStatic("/", LittleFS, "/")
+        .setDefaultFile("index.html")
+        .setCacheControl("no-cache, max-age=0, must-revalidate");
     
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!LittleFS.exists("/index.html")) {
-            request->send(200, "text/html", FALLBACK_HTML);
-        }
+        Serial.println("[WebServer] Missing static asset: /index.html (also tried .gz)");
+        AsyncWebServerResponse* response = request->beginResponse(503, "text/html", FALLBACK_HTML);
+        response->addHeader("Cache-Control", "no-store");
+        request->send(response);
     });
 
     server.onNotFound([](AsyncWebServerRequest *request) {
         if (request->method() == HTTP_GET) {
-            String path = request->url();
-            if (LittleFS.exists(path)) {
-                request->send(LittleFS, path, getContentType(path));
-                return;
-            }
+            Serial.printf("[WebServer] GET 404: %s (no route or LittleFS asset)\n", request->url().c_str());
         }
-        request->send(404, "text/plain", "404: Not Found");
+        AsyncWebServerResponse* response = request->beginResponse(404, "text/plain", "404: Not Found");
+        response->addHeader("Cache-Control", "no-store");
+        request->send(response);
     });
 }
 
