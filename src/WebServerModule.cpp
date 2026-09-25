@@ -147,7 +147,7 @@ void WebServerModule::setupRoutes() {
     server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
         bool active = analytics->isSessionActive();
         SessionRecord rec = analytics->getCurrentRecord();
-        MPUData mpu = sensor->getData();
+        MPUData mpu = sensor->peekData();
         
         JsonDocument doc;
         doc["type"] = "status";

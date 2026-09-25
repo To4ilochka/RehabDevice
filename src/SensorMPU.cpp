@@ -18,6 +18,7 @@ SensorMPU::SensorMPU() : dmpReady(false), mpuIntStatus(0), devStatus(0), packetS
                          pitchOffset(0.0f), rollOffset(0.0f), yawOffset(0.0f),
                          calState(CAL_IDLE), calWaitStartTime(0) {
     memset(&currentData, 0, sizeof(currentData));
+    dataMutex = xSemaphoreCreateMutex();
 }
 
 bool SensorMPU::init() {
@@ -165,21 +166,24 @@ void SensorMPU::update() {
                 return;
             }
 
-            currentData.yaw = rawYaw - yawOffset;
-            currentData.pitch = rawPitch - pitchOffset;
-            currentData.roll = rawRoll - rollOffset;
+            if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+                currentData.yaw = rawYaw - yawOffset;
+                currentData.pitch = rawPitch - pitchOffset;
+                currentData.roll = rawRoll - rollOffset;
 
-            // Convert gyro to deg/sec (131 LSB/deg/s) and accel to g (16384 LSB/g)
-            currentData.gyroX = gx / 131.0f;
-            currentData.gyroY = gy / 131.0f;
-            currentData.gyroZ = gz / 131.0f;
+                // Convert gyro to deg/sec (131 LSB/deg/s) and accel to g (16384 LSB/g)
+                currentData.gyroX = gx / 131.0f;
+                currentData.gyroY = gy / 131.0f;
+                currentData.gyroZ = gz / 131.0f;
 
-            currentData.accelX = ax / 16384.0f;
-            currentData.accelY = ay / 16384.0f;
-            currentData.accelZ = az / 16384.0f;
+                currentData.accelX = ax / 16384.0f;
+                currentData.accelY = ay / 16384.0f;
+                currentData.accelZ = az / 16384.0f;
 
-            currentData.dataUpdated = true;
-            currentData.timestamp = millis();
+                currentData.dataUpdated = true;
+                currentData.timestamp = millis();
+                xSemaphoreGive(dataMutex);
+            }
         }
     }
 }
@@ -197,8 +201,23 @@ bool SensorMPU::recalibrate() {
 }
 
 MPUData SensorMPU::getData() {
-    MPUData result = currentData;
-    currentData.dataUpdated = false;
+    MPUData result;
+    memset(&result, 0, sizeof(result));
+    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+        result = currentData;
+        currentData.dataUpdated = false;
+        xSemaphoreGive(dataMutex);
+    }
+    return result;
+}
+
+MPUData SensorMPU::peekData() {
+    MPUData result;
+    memset(&result, 0, sizeof(result));
+    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+        result = currentData;
+        xSemaphoreGive(dataMutex);
+    }
     return result;
 }
 

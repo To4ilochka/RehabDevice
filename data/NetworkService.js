@@ -8,7 +8,7 @@ export class NetworkService {
         this.pollTimer = null;
         this.reconnectInterval = null;
         this.wsReconnectAttempts = 0;
-        this.maxReconnectAttempts = 3;
+        this.maxReconnectAttempts = 10;
         
         this.messageHandlers = [];
         this.statusHandlers = [];
@@ -67,7 +67,7 @@ export class NetworkService {
 
         this.fetchAllSessionsPaginated();
 
-        this.pollTimer = setInterval(() => this.pollOnce(), 2000);
+        this.pollTimer = setInterval(() => this.pollOnce(), 250);
     }
 
     pollOnce() {
@@ -134,7 +134,7 @@ export class NetworkService {
                         return;
                     }
                     this.tryReconnectWebSocket();
-                }, 10000);
+                }, 5000);
             }
         };
 
