@@ -139,6 +139,93 @@ esp32dev-RehabDevice/
 
 > Скрипт `compress_fs.py` автоматично стискає JS/CSS через gzip перед упаковкою в образ LittleFS.
 
+#### Static asset delivery checks
+
+`compress_fs.py` refreshes the staging directory during the pre-script for
+`buildfs`, `uploadfs`, and `uploadfsota`, before PlatformIO constructs the image
+builder. The previous image pre-action did not run with this PlatformIO setup,
+so a successful filesystem upload could still contain stale staged assets.
+Gzip output is deterministic; other files are copied without modification.
+
+ESPAsyncWebServer 3.12.0 resolves logical URLs such as `/style.css` to
+`/style.css.gz`, sets `Content-Type: text/css`, and adds `Content-Encoding: gzip`.
+JavaScript uses the valid MIME type `text/javascript`. The same root static
+handler covers nested game scripts, fonts, and media. Static responses require
+cache revalidation; missing assets return uncached errors and are logged on
+Serial. No HTML or CSS workaround is needed.
+
+Run from the project directory in PowerShell:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32dev_RehabDevice
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32dev_RehabDevice -t buildfs
+& "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" scripts/check_static_assets.py
+```
+
+Close Serial Monitor before flashing both images. Filesystem upload replaces
+LittleFS, including any locally stored database backup; preserve needed data first.
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32dev_RehabDevice -t upload
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32dev_RehabDevice -t uploadfs
+```
+
+After connecting to the device Wi-Fi, verify actual HTTP headers and decompressed
+body bytes for every asset, including games and module query strings:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" scripts/check_static_assets.py --base-url http://rehab.local
+curl.exe --noproxy "*" --compressed -i http://rehab.local/style.css
+```
+
+Use `http://192.168.4.1` if mDNS is unavailable. Expect HTTP 200, `text/css`,
+`Content-Encoding: gzip`, `Cache-Control: no-cache, max-age=0, must-revalidate`,
+and CSS beginning with `:root`, not HTML. In iPhone Safari, reopen the device
+page and check the styled dashboard and each game. If an old cached page persists,
+clear this site's data once. Confirm `/api/status`, `/ws`, and `/update` still
+work; do not start an OTA upload just to test the page. A host-side build or
+browser preview alone does not establish that the flashed device works on Safari.
+
+#### Doctor dashboard regression checks
+
+Run the synthetic-data browser suite (no hardware or destructive device commands):
+
+```powershell
+python -m pip install playwright
+python -m playwright install chromium webkit
+python -m unittest discover -s test -p test_doctor_dashboard.py -v
+```
+
+The suite checks both DOM-preservation sequences, CSV downloads, mocked deletion
+confirmation, loading/error/pagination, norm validation and retention, progress
+baselines, and storage availability. Chromium and WebKit check 320, 390, 430,
+768, and 1280 CSS-pixel widths, overflow, metric styles, touch targets, sticky
+header and input focus. Session history retains all eight columns and scrolls
+inside its container on mobile; the default ALL view includes every patient.
+The chart regression checks a visible bubble at smoothness 61 / amplitude 359.8,
+dynamic Y-axis headroom (at least 180 degrees), invalid numeric inputs, and tab
+reactivation. Screenshots are written to `.pio/dashboard-checks/`.
+Readiness uses explicit UI assertions, never `networkidle`.
+
+Run the angle boundary assertions with the installed ESP32 C++ compiler:
+
+```powershell
+& "$env:USERPROFILE\.platformio\packages\toolchain-xtensa-esp32\bin\xtensa-esp32-elf-g++.exe" -std=c++11 -Wall -Wextra -Werror -I include -fsyntax-only test/test_angle_normalization.cpp
+```
+
+These compile-time tests require no board or native host compiler. Calibrated
+Euler differences are normalized to [-180, 180]; the shared helper accepts
+differences of two angles in that range. Analytics accumulates shortest roll
+steps into a continuous joint angle before calculating extrema and amplitude.
+The +179/-179 regressions check both crossing directions without a false
+358-degree span. Historical database records are not rewritten.
+
+After `buildfs`, run the static-asset checker above. On hardware, also use its
+`--base-url` option. Verify scrolling, search/norm keyboard focus, rotation and
+safe areas in actual iPhone Safari; desktop WebKit does not emulate Safari's
+browser chrome or the iOS keyboard. Filesystem flashing requires a database
+backup and explicit operator approval; these tests never upload an image.
+
 ### Крок 3. Підключення та робота
 
 1. Підключіться до Wi-Fi: **`RehabDevice_AP`** (пароль: **`rehab1234`**)
