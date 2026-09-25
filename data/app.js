@@ -20,7 +20,7 @@ function initApp() {
         if (data.type === "angle") {
             const invertToggle = document.getElementById("invertAngleToggle");
             const angle = invertToggle && invertToggle.checked ? -data.angle : data.angle;
-            stateManager.update('targetAngle', angle);
+            gameEngine.setTargetAngle(angle);
         } else if (data.type === "status") {
             stateManager.updateMultiple({
                 globalSdAvailable: data.sdAvailable !== false,
@@ -38,8 +38,12 @@ function initApp() {
             }
         } else if (data.type === "liveStats") {
             stateManager.update('liveStats', data);
+        } else if (data.type === "sessionsLoading" || data.type === "sessionsError") {
+            stateManager.update('sessionsStatus', data.type === "sessionsLoading" ? 'loading' : 'error');
+            uiManager.updateDoctorDashboardView();
         } else if (data.type === "sessionsComplete") {
             stateManager.update('allSessionsData', data.sessions || []);
+            stateManager.update('sessionsStatus', 'ready');
             uiManager.renderPatientPills(data.sessions || []);
             uiManager.updateDoctorDashboardView();
         }

@@ -7,6 +7,7 @@ export class NetworkService {
         this.usePolling = false;
         this.pollTimer = null;
         this.reconnectInterval = null;
+        this.wsRecoveryTimer = null;
         this.wsReconnectAttempts = 0;
         this.maxReconnectAttempts = 10;
         
@@ -57,6 +58,7 @@ export class NetworkService {
             this.reconnectInterval = null; 
         }
         this.startHttpPolling();
+        this.startWebSocketReconnectCycle();
     }
 
     startHttpPolling() {
@@ -67,6 +69,7 @@ export class NetworkService {
 
         this.fetchAllSessionsPaginated();
 
+        if (this.pollTimer) clearInterval(this.pollTimer);
         this.pollTimer = setInterval(() => this.pollOnce(), 250);
     }
 
@@ -89,11 +92,16 @@ export class NetworkService {
 
         this.ws.onopen = () => {
             this.usePolling = false;
+            this.wsReconnectAttempts = 0;
             this.notifyStatus(true, false);
             
             if (this.reconnectInterval) {
                 clearInterval(this.reconnectInterval);
                 this.reconnectInterval = null;
+            }
+            if (this.wsRecoveryTimer) {
+                clearTimeout(this.wsRecoveryTimer);
+                this.wsRecoveryTimer = null;
             }
             if (this.pollTimer) {
                 clearInterval(this.pollTimer);
@@ -120,22 +128,7 @@ export class NetworkService {
             }
             
             // Try to reconnect WebSocket in the background (limited attempts)
-            if (!this.reconnectInterval && this.wsReconnectAttempts < this.maxReconnectAttempts) {
-                this.reconnectInterval = setInterval(() => {
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        clearInterval(this.reconnectInterval);
-                        this.reconnectInterval = null;
-                        return;
-                    }
-                    if (this.wsReconnectAttempts >= this.maxReconnectAttempts) {
-                        clearInterval(this.reconnectInterval);
-                        this.reconnectInterval = null;
-                        console.log("Max WS reconnect attempts reached, staying on HTTP polling.");
-                        return;
-                    }
-                    this.tryReconnectWebSocket();
-                }, 5000);
-            }
+            this.startWebSocketReconnectCycle();
         };
 
         this.ws.onmessage = (event) => {
@@ -144,6 +137,38 @@ export class NetworkService {
                 this.handleServerMessage(data);
             } catch (e) {}
         };
+    }
+
+    startWebSocketReconnectCycle() {
+        if (this.reconnectInterval || (this.ws && this.ws.readyState === WebSocket.OPEN)) return;
+
+        this.reconnectInterval = setInterval(() => {
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                clearInterval(this.reconnectInterval);
+                this.reconnectInterval = null;
+                return;
+            }
+            if (this.wsReconnectAttempts >= this.maxReconnectAttempts) {
+                clearInterval(this.reconnectInterval);
+                this.reconnectInterval = null;
+                console.log("Max WS reconnect attempts reached, staying on HTTP polling.");
+                this.scheduleWebSocketRecovery();
+                return;
+            }
+            this.tryReconnectWebSocket();
+        }, 5000);
+    }
+
+    scheduleWebSocketRecovery() {
+        if (this.wsRecoveryTimer) return;
+
+        // Periodically retry after the bounded cycle so transient Wi-Fi issues do not make polling permanent.
+        this.wsRecoveryTimer = setTimeout(() => {
+            this.wsRecoveryTimer = null;
+            this.wsReconnectAttempts = 0;
+            this.tryReconnectWebSocket();
+            this.startWebSocketReconnectCycle();
+        }, 75000);
     }
 
     tryReconnectWebSocket() {
@@ -160,6 +185,10 @@ export class NetworkService {
                 if (this.reconnectInterval) {
                     clearInterval(this.reconnectInterval);
                     this.reconnectInterval = null;
+                }
+                if (this.wsRecoveryTimer) {
+                    clearTimeout(this.wsRecoveryTimer);
+                    this.wsRecoveryTimer = null;
                 }
                 if (this.ws) {
                     this.ws.onclose = null;
@@ -180,7 +209,7 @@ export class NetworkService {
                         this.usePolling = true;
                         this.startHttpPolling();
                     }
-                    // Don't retry after reconnected WS fails again — stay on polling
+                    this.startWebSocketReconnectCycle();
                 };
                 testWs.onerror = (e) => console.error("WS error:", e);
                 testWs.onmessage = (event) => {
@@ -218,34 +247,29 @@ export class NetworkService {
     }
 
     fetchAllSessionsPaginated() {
-        // Sessions always loaded via HTTP REST MessagePack (never WebSocket)
-        let all = [];
-        let offset = 0;
-        const limit = 50;
-        
-        const loadNextChunk = () => {
-            fetch(`${this.DEVICE_HOST}/api/sessions?offset=${offset}&limit=${limit}`)
-                .then(r => r.arrayBuffer())
-                .then(buffer => {
-                    let data = [];
-                    try {
-                        data = msgpack.decode(new Uint8Array(buffer));
-                    } catch (e) {
-                        console.error("MsgPack decode error:", e);
-                        return;
-                    }
-
-                    if (!Array.isArray(data)) return;
-                    all = all.concat(data);
-                    
-                    if (data.length === limit) {
-                        offset += limit;
-                        loadNextChunk();
-                    } else {
-                        this.notifyMessage({ type: "sessionsComplete", sessions: all });
-                    }
-                }).catch(e => console.error(e));
-        };
-        loadNextChunk();
+        if (this.sessionsRequest) return this.sessionsRequest;
+        this.notifyMessage({ type: "sessionsLoading" });
+        this.sessionsRequest = (async () => {
+            const all = [];
+            const limit = 50;
+            let offset = 0;
+            try {
+                while (true) {
+                    const response = await fetch(`${this.DEVICE_HOST}/api/sessions?offset=${offset}&limit=${limit}`);
+                    if (!response.ok) throw new Error(`Sessions HTTP ${response.status}`);
+                    const buffer = await response.arrayBuffer();
+                    const data = msgpack.decode(new Uint8Array(buffer));
+                    if (!Array.isArray(data)) throw new Error("Invalid sessions response");
+                    all.push(...data);
+                    if (data.length < limit) break;
+                    offset += limit;
+                }
+                this.notifyMessage({ type: "sessionsComplete", sessions: all });
+            } catch (error) {
+                console.error("Sessions load failed:", error);
+                this.notifyMessage({ type: "sessionsError" });
+            }
+        })().finally(() => { this.sessionsRequest = null; });
+        return this.sessionsRequest;
     }
 }
