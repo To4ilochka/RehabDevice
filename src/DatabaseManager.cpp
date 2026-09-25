@@ -24,10 +24,17 @@ DatabaseManager::DatabaseManager() {
     usingSD = false;
     dbPathSD = "/sd/rehab.db";
     dbPathFS = "/littlefs/rehab.db";
+    dbMutex = xSemaphoreCreateMutex();
+    if (dbMutex == nullptr) {
+        Serial.println("[DatabaseManager] FATAL: Failed to create db mutex!");
+    }
 }
 
 DatabaseManager::~DatabaseManager() {
     close();
+    if (dbMutex != nullptr) {
+        vSemaphoreDelete(dbMutex);
+    }
 }
 
 bool DatabaseManager::init(bool useSD) {
@@ -157,9 +164,11 @@ bool DatabaseManager::saveSessionDb(const SessionRecord& rec) {
     
     int maxRetries = 3;
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        xSemaphoreTake(dbMutex, portMAX_DELAY);
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
             Serial.printf("[DatabaseManager] Attempt %d: Failed to prepare insert statement: %s\n", attempt, sqlite3_errmsg(db));
+            xSemaphoreGive(dbMutex);
             vTaskDelay(pdMS_TO_TICKS(100));
             continue; // try again
         }
@@ -177,6 +186,7 @@ bool DatabaseManager::saveSessionDb(const SessionRecord& rec) {
 
         int rc = sqlite3_step(stmt);
         sqlite3_finalize(stmt);
+        xSemaphoreGive(dbMutex);
 
         if (rc == SQLITE_DONE) {
             Serial.println("[DatabaseManager] Session saved to database.");
@@ -205,11 +215,14 @@ sqlite3_stmt* DatabaseManager::prepareSessionsQuery(int limit, int offset) {
         "FROM sessions ORDER BY timestamp DESC LIMIT %d OFFSET %d;", 
         limit, offset);
     
+    xSemaphoreTake(dbMutex, portMAX_DELAY);
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         Serial.printf("[DatabaseManager] Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        xSemaphoreGive(dbMutex);
         return nullptr;
     }
+    xSemaphoreGive(dbMutex);
     return stmt;
 }
 
@@ -218,6 +231,7 @@ int DatabaseManager::countSessionsPage(int limit, int offset) {
     char sql[256];
     snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM (SELECT 1 FROM sessions LIMIT %d OFFSET %d);", limit, offset);
     
+    xSemaphoreTake(dbMutex, portMAX_DELAY);
     sqlite3_stmt* stmt;
     int count = 0;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -226,17 +240,35 @@ int DatabaseManager::countSessionsPage(int limit, int offset) {
         }
         sqlite3_finalize(stmt);
     }
+    xSemaphoreGive(dbMutex);
     return count;
+}
+
+int DatabaseManager::stepStatement(sqlite3_stmt* stmt) {
+    if (!stmt) return SQLITE_MISUSE;
+    xSemaphoreTake(dbMutex, portMAX_DELAY);
+    int rc = sqlite3_step(stmt);
+    xSemaphoreGive(dbMutex);
+    return rc;
+}
+
+void DatabaseManager::finalizeStatement(sqlite3_stmt* stmt) {
+    if (!stmt) return;
+    xSemaphoreTake(dbMutex, portMAX_DELAY);
+    sqlite3_finalize(stmt);
+    xSemaphoreGive(dbMutex);
 }
 
 bool DatabaseManager::deletePatient(String patientId) {
     if (!db || patientId.isEmpty()) return false;
     
     const char* sql = "DELETE FROM sessions WHERE patient_id = ?;";
+    xSemaphoreTake(dbMutex, portMAX_DELAY);
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         Serial.printf("[DatabaseManager] Failed to prepare deletePatient statement: %s\n", sqlite3_errmsg(db));
+        xSemaphoreGive(dbMutex);
         return false;
     }
     
@@ -250,6 +282,7 @@ bool DatabaseManager::deletePatient(String patientId) {
     }
     
     sqlite3_finalize(stmt);
+    xSemaphoreGive(dbMutex);
     return success;
 }
 
@@ -258,7 +291,10 @@ bool DatabaseManager::deleteSession(int id) {
     
     char sql[128];
     snprintf(sql, sizeof(sql), "DELETE FROM sessions WHERE id = %d;", id);
-    return execQuery(sql);
+    xSemaphoreTake(dbMutex, portMAX_DELAY);
+    bool result = execQuery(sql);
+    xSemaphoreGive(dbMutex);
+    return result;
 }
 
 void DatabaseManager::close() {

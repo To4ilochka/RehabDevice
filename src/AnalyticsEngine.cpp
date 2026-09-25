@@ -1,16 +1,28 @@
 #include "AnalyticsEngine.h"
+#include "AngleMath.h"
 #include <time.h>
 #include <math.h>
 #include <ArduinoJson.h>
 
 AnalyticsEngine::AnalyticsEngine() : sessionActive(false), speedSamplesCount(0) {
+    mutex = xSemaphoreCreateRecursiveMutex();
+    if (mutex == nullptr) {
+        Serial.println("[AnalyticsEngine] FATAL: Failed to create state mutex!");
+    }
     reset();
+}
+
+AnalyticsEngine::~AnalyticsEngine() {
+    if (mutex != nullptr) {
+        vSemaphoreDelete(mutex);
+    }
 }
 
 void AnalyticsEngine::reset() {
     minAngle = INFINITY;
     maxAngle = -INFINITY;
     currentAngle = 0.0f;
+    previousRoll = 0.0f;
     totalSpeedSum = 0.0f;
     speedSamplesCount = 0;
     lastGyroDegS = 0.0f;
@@ -23,6 +35,7 @@ void AnalyticsEngine::reset() {
 }
 
 void AnalyticsEngine::startSession(const String& patientName) {
+    xSemaphoreTakeRecursive(mutex, portMAX_DELAY);
     reset();
     patientId = patientName;
     sessionActive = true;
@@ -35,29 +48,45 @@ void AnalyticsEngine::startSession(const String& patientName) {
     
     Serial.printf("[AnalyticsEngine] Session started for patient '%s', time: %s\n", 
                   patientId.c_str(), getFormattedDateTime().c_str());
+    xSemaphoreGiveRecursive(mutex);
 }
 
 bool AnalyticsEngine::stopSession() {
-    if (!sessionActive) return false;
+    xSemaphoreTakeRecursive(mutex, portMAX_DELAY);
+    if (!sessionActive) {
+        xSemaphoreGiveRecursive(mutex);
+        return false;
+    }
 
     SessionRecord record = getCurrentRecord();
     sessionActive = false;
 
     Serial.printf("[AnalyticsEngine] Session stopped. Flexions: %d, Smoothness: %.1f%%, Duration: %.1f s\n", 
                   record.flexionsCount, record.smoothness, record.sessionDuration);
+    xSemaphoreGiveRecursive(mutex);
     return true;
 }
 
 void AnalyticsEngine::processData(const MPUData& data) {
-    if (!sessionActive || !data.dataUpdated) return;
+    if (!data.dataUpdated || !isfinite(data.roll)) return;
+    xSemaphoreTakeRecursive(mutex, portMAX_DELAY);
+    if (!sessionActive) {
+        xSemaphoreGiveRecursive(mutex);
+        return;
+    }
 
     unsigned long nowMs = millis();
     float dt = (nowMs - lastUpdateMs) / 1000.0f;
-    if (dt <= 0.0001f) return; // Prevent division by zero if called too frequently
+    if (dt <= 0.0001f) {
+        xSemaphoreGiveRecursive(mutex);
+        return; // Prevent division by zero if called too frequently
+    }
     lastUpdateMs = nowMs;
 
     // Use wrist roll angle as primary movement metric
-    currentAngle = data.roll;
+    currentAngle = speedSamplesCount == 0 ? data.roll
+        : currentAngle + normalizeAngleDifference(data.roll - previousRoll);
+    previousRoll = data.roll;
 
     // Update session global minimum and maximum
     if (currentAngle < minAngle) minAngle = currentAngle;
@@ -98,13 +127,18 @@ void AnalyticsEngine::processData(const MPUData& data) {
             hystState = STATE_SEARCHING_MAX;
         }
     }
+    xSemaphoreGiveRecursive(mutex);
 }
 
 bool AnalyticsEngine::isSessionActive() const {
-    return sessionActive;
+    xSemaphoreTakeRecursive(mutex, portMAX_DELAY);
+    bool active = sessionActive;
+    xSemaphoreGiveRecursive(mutex);
+    return active;
 }
 
 SessionRecord AnalyticsEngine::getCurrentRecord() const {
+    xSemaphoreTakeRecursive(mutex, portMAX_DELAY);
     SessionRecord record;
     memset(&record, 0, sizeof(SessionRecord)); // zero initialize
     strncpy(record.patientId, patientId.c_str(), sizeof(record.patientId) - 1);
@@ -118,10 +152,12 @@ SessionRecord AnalyticsEngine::getCurrentRecord() const {
     record.smoothness = smoothnessScore;
     record.flexionsCount = flexionsCount;
     record.sessionDuration = (millis() - sessionStartTimeMs) / 1000.0f;
+    xSemaphoreGiveRecursive(mutex);
     return record;
 }
 
 String AnalyticsEngine::getLiveStatsJSON() {
+    xSemaphoreTakeRecursive(mutex, portMAX_DELAY);
     SessionRecord rec = getCurrentRecord();
     JsonDocument doc;
     
@@ -137,6 +173,7 @@ String AnalyticsEngine::getLiveStatsJSON() {
 
     String jsonStr;
     serializeJson(doc, jsonStr);
+    xSemaphoreGiveRecursive(mutex);
     return jsonStr;
 }
 

@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <sqlite3.h>
 #include <LittleFS.h>
+#include <freertos/semphr.h>
 #include "Config.h"
 #include "AnalyticsEngine.h" // For SessionRecord
 
@@ -33,6 +34,14 @@ public:
     // Delete a single session by id
     bool deleteSession(int id);
 
+    // Step a prepared statement, serialized against other DB access (used for
+    // long-lived streaming queries whose sqlite3_step calls happen across
+    // multiple AsyncTCP callback invocations).
+    int stepStatement(sqlite3_stmt* stmt);
+
+    // Finalize a prepared statement, serialized against other DB access
+    void finalizeStatement(sqlite3_stmt* stmt);
+
     // Check if SD is currently being used
     bool isSDAvailable() const { return usingSD; }
 
@@ -44,6 +53,11 @@ private:
     bool usingSD;
     const char* dbPathSD;
     const char* dbPathFS;
+
+    // Serializes all sqlite3 API calls on `db`: the connection is shared between
+    // dbTask (writes) and AsyncWebServer request handlers (reads), which run in
+    // different FreeRTOS tasks/cores.
+    SemaphoreHandle_t dbMutex;
 
     // Helper to execute a query without results
     bool execQuery(const char* sql);
