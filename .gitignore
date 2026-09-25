@@ -24,3 +24,6 @@ data_src_temp/
 
 # Python scripts
 scripts/
+
+# Article drafts (local only)
+paper/
