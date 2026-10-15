@@ -6,6 +6,8 @@ export class GameEngine {
         this.activeGame = null;
         this.animationId = null;
         this.lastTime = 0;
+        this.lastAngleSampleTime = null;
+        this.angleSampleInterval = 1 / 20;
         this.isRunning = false;
         
         this.api = {
@@ -47,6 +49,15 @@ export class GameEngine {
     start() {
         this.lastTime = performance.now();
         this.loop(this.lastTime);
+    }
+
+    setTargetAngle(angle) {
+        const now = performance.now();
+        if (this.lastAngleSampleTime !== null) {
+            this.angleSampleInterval = Math.min((now - this.lastAngleSampleTime) / 1000, 0.5);
+        }
+        this.lastAngleSampleTime = now;
+        this.stateManager.update('targetAngle', angle);
     }
 
     loadGame(gameId, callback) {
@@ -118,8 +129,8 @@ export class GameEngine {
         const targetAngle = this.stateManager.get('targetAngle');
         
         // Smooth interpolation only for visual circle indicator
-        const smoothingSpeed = 15.0;
-        const alpha = 1.0 - Math.exp(-smoothingSpeed * dt);
+        const smoothingDuration = Math.max(1 / 15, this.angleSampleInterval);
+        const alpha = 1.0 - Math.exp(-dt / smoothingDuration);
         this.currentAngle = this.currentAngle + (targetAngle - this.currentAngle) * alpha;
         
         // Render UI circle indicator with smoothed angle

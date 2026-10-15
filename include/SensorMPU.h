@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <freertos/semphr.h>
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 #include "Config.h"
@@ -28,8 +29,10 @@ public:
     bool init();
     void update();
     bool recalibrate();
-    MPUData getData();
+    MPUData getData();      // Consumes dataUpdated flag (for sensorTask)
+    MPUData peekData();     // Read-only, does NOT consume dataUpdated (for web routes)
     bool isReady() const;
+    uint32_t getMutexMissCount() const;
 
     static void IRAM_ATTR dmpDataReadyISR();
 
@@ -51,6 +54,8 @@ private:
     float yawOffset;
 
     MPUData currentData;
+    SemaphoreHandle_t dataMutex;   // Protects currentData across cores
+    uint32_t mutexMissCount;
 
     enum CalibrationState { CAL_IDLE, CAL_WAITING_FIFO };
     CalibrationState calState;

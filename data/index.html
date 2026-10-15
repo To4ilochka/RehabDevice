@@ -2,7 +2,7 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>RehabDevice — Система моніторингу реабілітації кисті</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -22,11 +22,8 @@
             </div>
             <div class="memory-widget">
                 <div class="memory-label">
-                    <span id="memoryTypeLabel">Пам'ять (LittleFS)</span>
-                    <span id="memoryText">---</span>
-                </div>
-                <div class="memory-progress">
-                    <div class="memory-bar" id="memoryBar" style="width: 0%"></div>
+                    <span id="memoryTypeLabel">Сховище</span>
+                    <span id="memoryText">Стан невідомий</span>
                 </div>
             </div>
         </div>
@@ -186,8 +183,8 @@
             <div class="card">
                 <div class="card-header flex-wrap gap-m">
                     <div class="card-title">🩺 Аналітичний дашборд та клінічна динаміка</div>
-                    <div class="flex-row-center flex-wrap gap-s">
-                        <input type="text" id="patientSearchInput" class="input-field search-input" placeholder="🔍 Точне ПІБ пацієнта...">
+                    <div class="flex-row-center flex-wrap gap-s doctor-search-controls">
+                        <input type="text" id="patientSearchInput" class="input-field search-input" aria-label="Пошук пацієнта" placeholder="🔍 Точне ПІБ пацієнта...">
                         <button class="btn btn-secondary btn-sm" id="btnExactSearch" title="Точний пошук пацієнта">Знайти</button>
                         <button class="btn btn-sm" id="btnDownloadCSV" title="Завантажити CSV таблицю">
                             📥 Завантажити CSV (Всі)
@@ -201,15 +198,25 @@
                 </div>
 
                 <!-- Clinical course summary for selected patient -->
-                <div id="patientSummaryContainer" class="patient-summary-box">
+                <div id="doctorLoadingState" class="doctor-state" role="status">Завантаження даних...</div>
+                <div id="doctorEmptyState" class="doctor-state" role="status" hidden>База даних порожня</div>
+                <div id="doctorNoResultsState" class="doctor-state" role="status" hidden>
+                    <p id="doctorNoResultsText">Нічого не знайдено</p>
+                    <button id="btnShowAllPatients" class="btn btn-secondary">Показати всіх пацієнтів</button>
+                </div>
+                <div id="doctorErrorState" class="doctor-state" role="status" hidden>
+                    <p>Не вдалося завантажити історію сесій.</p>
+                    <button id="btnRetrySessions" class="btn btn-secondary">Повторити</button>
+                </div>
+                <div id="patientSummaryContainer" class="patient-summary-box" hidden>
                     <div class="summary-header">
                         <div>
                             <span class="summary-subtitle">Резюме курсу реабілітації</span>
                             <h3 id="summaryPatientName" class="summary-title">Пацієнт</h3>
                         </div>
                         <div class="flex-row-center flex-wrap gap-m">
-                            <div id="summaryProgressBadge" class="progress-badge">
-                                🔥 Прогрес: +0.0° (+0%)
+                            <div id="summaryProgressBadge" class="progress-badge neutral">
+                                Початкова сесія
                             </div>
                             <button class="btn btn-outline-info" id="btnDownloadClientCSV" title="Завантажити CSV лише для цього клієнта">
                                 📥 Завантажити CSV клієнта
@@ -223,14 +230,15 @@
                     <!-- Target norm and functional recovery calculation -->
                     <div class="target-norm-panel">
                         <div class="flex-row-center gap-m">
-                            <span class="text-sm fw-normal text-secondary">🎯 Цільова норма суглоба:</span>
-                            <input type="number" id="targetNormInput" value="90" min="10" max="180" class="input-field norm-input">
+                            <label for="targetNormInput" class="text-sm fw-normal text-secondary">🎯 Цільова норма суглоба:</label>
+                            <input type="number" id="targetNormInput" value="90" min="10" max="180" step="any" required aria-describedby="targetNormError" class="input-field norm-input">
                             <span class="text-sm text-muted">град.</span>
                         </div>
                         <div class="flex-row-center gap-s">
-                            <span class="text-sm fw-normal text-secondary">Функціональне відновлення:</span>
-                            <span id="recoveryIndexVal" class="recovery-value">0%</span>
+                            <span class="text-sm fw-normal text-secondary">Амплітуда відносно цілі:</span>
+                            <span id="recoveryIndexVal" class="recovery-value">—</span>
                         </div>
+                        <p id="targetNormError" class="text-sm" role="status" hidden>Введіть скінченне число від 10 до 180°.</p>
                     </div>
 
                     <div class="metrics-grid mt-s">

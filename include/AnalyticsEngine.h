@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <sys/time.h>
+#include <freertos/semphr.h>
 #include "SensorMPU.h"
 #include "Config.h"
 
@@ -30,6 +31,7 @@ struct SessionRecord {
 class AnalyticsEngine {
 public:
     AnalyticsEngine();
+    ~AnalyticsEngine();
     
     // Start tracking session for a specific patient
     void startSession(const String& patientName);
@@ -63,6 +65,7 @@ private:
     float minAngle;
     float maxAngle;
     float currentAngle;
+    float previousRoll;
     
     // Speed metrics
     float totalSpeedSum;
@@ -73,6 +76,11 @@ private:
     unsigned long tremorSpikesCount;
     float smoothnessScore;
     
+    // Serializes access to session state: written by the sensor/loop task via
+    // processData(), read/written by AsyncWebServer HTTP and WebSocket callbacks
+    // which run in a different FreeRTOS task/core.
+    mutable SemaphoreHandle_t mutex;
+
     // Flexions hysteresis detector
     HysteresisState hystState;
     float localExtremeAngle;

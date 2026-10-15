@@ -4,16 +4,38 @@ export class UIManager {
         this.networkService = networkService;
         this.doctorChart = null;
         this.selectedDoctorPatient = "ALL";
+        this.doctorSearchQuery = "";
     }
 
     init() {
         this.initChart();
         this.setupTabNavigation();
         this.setupEventListeners();
+        const header = document.querySelector("header");
+        if (header && typeof ResizeObserver !== "undefined") {
+            this.headerObserver = new ResizeObserver(() => {
+                document.documentElement.style.setProperty("--header-height", `${header.getBoundingClientRect().height}px`);
+            });
+            this.headerObserver.observe(header);
+        }
+        const keepDoctorInputVisible = () => requestAnimationFrame(() => {
+            const input = document.activeElement;
+            if (!input?.matches("#targetNormInput, #patientSearchInput")) return;
+            const viewport = window.visualViewport;
+            const top = Math.max(header?.getBoundingClientRect().bottom || 0, viewport?.offsetTop || 0);
+            const bottom = (viewport?.offsetTop || 0) + (viewport?.height || window.innerHeight);
+            const bounds = input.getBoundingClientRect();
+            if (bounds.top < top || bounds.bottom > bottom) {
+                window.scrollBy({ top: (bounds.top + bounds.bottom - top - bottom) / 2, behavior: "auto" });
+            }
+        });
+        document.getElementById("tabDoctor").addEventListener("focusin", keepDoctorInputVisible);
+        window.visualViewport?.addEventListener("resize", keepDoctorInputVisible);
         
         // Subscribe to state changes
         this.stateManager.subscribe('isConnected', (isConn) => {
             this.updateConnectionStatus(isConn, this.stateManager.get('isHttpFallback'));
+            this.updateMemory();
         });
         
         this.stateManager.subscribe('isHttpFallback', (isFall) => {
@@ -60,18 +82,17 @@ export class UIManager {
         }
     }
 
-    updateMemory(mem) {
+    updateMemory() {
         const memoryText = document.getElementById("memoryText");
         const memoryLabel = document.getElementById("memoryTypeLabel");
         const isSdAvailable = this.stateManager.get('globalSdAvailable');
         
         if (memoryLabel) {
-            memoryLabel.textContent = isSdAvailable ? "Пам'ять (SD-карта)" : "Пам'ять (LittleFS)";
+            memoryLabel.textContent = "Сховище";
         }
         if (memoryText) {
-            document.getElementById("memoryBar").style.width = isSdAvailable ? '100%' : '50%';
-            memoryText.textContent = "База даних активна";
-            memoryText.style.color = "";
+            memoryText.textContent = !this.stateManager.get('isConnected') || isSdAvailable == null
+                ? "Стан невідомий" : isSdAvailable ? "SD-карта доступна" : "SD-карта відсутня";
         }
     }
 
@@ -119,6 +140,12 @@ export class UIManager {
                 if (targetId === "tabDoctor") {
                     this.updateDoctorDashboardView();
                     this.networkService.fetchAllSessionsPaginated();
+                    requestAnimationFrame(() => {
+                        if (document.getElementById(targetId).classList.contains("active") && this.doctorChart) {
+                            this.doctorChart.resize();
+                            this.doctorChart.update('none');
+                        }
+                    });
                 }
             });
         });
@@ -254,6 +281,9 @@ export class UIManager {
             normInput.addEventListener("input", () => this.updateDoctorDashboardView());
         }
 
+        document.getElementById("btnShowAllPatients")?.addEventListener("click", () => this.selectPatientByPill("ALL", true));
+        document.getElementById("btnRetrySessions")?.addEventListener("click", () => this.networkService.fetchAllSessionsPaginated());
+
         const btnModeGame = document.getElementById("btnModeGame");
         const btnExitGame = document.getElementById("btnExitGame");
         const gameContainer = document.getElementById("gameContainer");
@@ -314,6 +344,7 @@ export class UIManager {
 
     selectPatientByPill(patientName, triggerUpdate = true) {
         this.selectedDoctorPatient = patientName;
+        this.doctorSearchQuery = "";
         
         document.querySelectorAll(".patient-pill").forEach(btn => {
             if (btn.getAttribute("data-patient") === patientName) {
@@ -333,122 +364,52 @@ export class UIManager {
         const filterLabel = document.getElementById("tableFilterLabel");
         const summaryBox = document.getElementById("patientSummaryContainer");
         const allSessionsData = this.stateManager.get('allSessionsData') || [];
-
-        const chartWrapper = document.getElementById("chartWrapperContainer");
-
-        if (allSessionsData.length === 0) {
-            if (summaryBox) {
-                summaryBox.innerHTML = `
-                    <div style="padding: 2.5rem 1rem; text-align: center; background: rgba(0, 242, 254, 0.05); border: 1px dashed rgba(0, 242, 254, 0.3); border-radius: 14px; margin-bottom: 0.5rem;">
-                        <div style="font-size: 3rem; margin-bottom: 1rem;">🏥</div>
-                        <h3 style="color: #00f2fe; font-size: 1.3rem; margin-bottom: 0.5rem; font-weight: 700;">База даних порожня</h3>
-                        <p style="color: var(--text-secondary); font-size: 0.95rem; max-width: 500px; margin: 0 auto; line-height: 1.5;">В базі даних ще немає жодного запису. Проведіть перше тренування з пацієнтом, щоб тут з'явилась аналітика.</p>
-                    </div>`;
-                summaryBox.style.display = "block";
-            }
-            if (chartWrapper) chartWrapper.style.display = "none";
-            if (filterLabel) filterLabel.textContent = "(Всі пацієнти)";
-            
-            const btnDownloadCSV = document.getElementById("btnDownloadCSV");
-            if (btnDownloadCSV) btnDownloadCSV.style.display = "none";
-            
-            return;
-        } else {
-            const btnDownloadCSV = document.getElementById("btnDownloadCSV");
-            if (btnDownloadCSV) btnDownloadCSV.style.display = "inline-block";
-            if (chartWrapper) chartWrapper.style.display = "block";
-        }
-
+        if (isExactSearch) this.doctorSearchQuery = searchQuery.trim();
         let filtered = allSessionsData;
-        if (isExactSearch && searchQuery && typeof searchQuery === "string" && searchQuery.length > 0) {
-            const query = searchQuery.trim().toLowerCase();
+        if (this.doctorSearchQuery) {
+            const query = this.doctorSearchQuery.toLowerCase();
             filtered = allSessionsData.filter(s => (s.patientId || "").trim().toLowerCase() === query);
             if (filtered.length === 0) {
                 filtered = allSessionsData.filter(s => (s.patientId || "").trim().toLowerCase().includes(query));
             }
-
-            if (filterLabel) filterLabel.textContent = `(Пошук: «${searchQuery.trim()}» — знайдено: ${filtered.length})`;
-            if (filtered.length > 0) {
-                this.selectedDoctorPatient = (filtered[0].patientId || "Пацієнт").trim();
-                document.querySelectorAll(".patient-pill").forEach(btn => {
-                    btn.classList.toggle("active", btn.getAttribute("data-patient") === this.selectedDoctorPatient);
-                });
-            }
+            const names = new Set(filtered.map(session => (session.patientId || "Пацієнт").trim()));
+            this.selectedDoctorPatient = names.size === 1 ? [...names][0] : "ALL";
+            if (filterLabel) filterLabel.textContent = `(Пошук: «${this.doctorSearchQuery}» — знайдено: ${filtered.length})`;
         } else if (this.selectedDoctorPatient && this.selectedDoctorPatient !== "ALL") {
             filtered = allSessionsData.filter(s => (s.patientId || "Пацієнт").trim() === this.selectedDoctorPatient);
             if (filterLabel) filterLabel.textContent = `(Пацієнт: ${this.selectedDoctorPatient})`;
         } else {
             if (filterLabel) filterLabel.textContent = "(Всі пацієнти)";
         }
-
+        document.querySelectorAll(".patient-pill").forEach(btn => {
+            btn.classList.toggle("active", btn.getAttribute("data-patient") === this.selectedDoctorPatient);
+        });
         const normInput = document.getElementById("targetNormInput");
-        const targetNorm = normInput ? (parseFloat(normInput.value) || 90.0) : 90.0;
+        const targetNorm = normInput.valueAsNumber;
+        const validNorm = Number.isFinite(targetNorm) && targetNorm >= 10 && targetNorm <= 180;
+        normInput.setCustomValidity(validNorm ? "" : "Введіть число від 10 до 180°.");
+        normInput.setAttribute("aria-invalid", String(!validNorm));
+        document.getElementById("targetNormError").hidden = validNorm;
 
-        if (isExactSearch && searchQuery && filtered.length === 0 && summaryBox) {
-            summaryBox.innerHTML = "";
-            const notFoundMsg = document.createElement("div");
-            notFoundMsg.style.cssText = "padding: 1.8rem 1rem; text-align: center; background: rgba(255, 23, 68, 0.08); border: 1px dashed rgba(255, 23, 68, 0.45); border-radius: 14px; margin-bottom: 0.5rem;";
-            
-            const icon = document.createElement("div");
-            icon.style.cssText = "font-size: 2.5rem; margin-bottom: 0.6rem;";
-            icon.textContent = "🔍 📭";
-            
-            const title = document.createElement("h3");
-            title.style.cssText = "color: #ff1744; font-size: 1.2rem; margin-bottom: 0.4rem; font-weight: 700;";
-            title.textContent = `За запитом «${searchQuery.trim()}» нічого не знайдено`;
-            
-            const p = document.createElement("p");
-            p.style.cssText = "color: var(--text-secondary); font-size: 0.88rem; margin-bottom: 1.2rem; max-width: 480px; margin-left: auto; margin-right: auto; line-height: 1.45;";
-            p.textContent = "Пацієнтів або збережених сесій з таким іменем в історії немає.";
-            
-            const btn = document.createElement("button");
-            btn.className = "btn btn-secondary";
-            btn.style.cssText = "padding: 0.5rem 1.2rem; font-size: 0.88rem; border-radius: 8px;";
-            btn.textContent = "🧑 Показати всіх пацієнтів";
-            btn.onclick = () => this.selectPatientByPill("ALL", true);
-            
-            notFoundMsg.appendChild(icon);
-            notFoundMsg.appendChild(title);
-            notFoundMsg.appendChild(p);
-            notFoundMsg.appendChild(btn);
-            
-            summaryBox.appendChild(notFoundMsg);
-            summaryBox.style.display = "block";
-        } else if ((this.selectedDoctorPatient !== "ALL" || searchQuery) && filtered.length > 0 && summaryBox) {
-            
-            if (!document.getElementById("summaryPatientName")) {
-                summaryBox.innerHTML = `
-                    <div class="summary-header">
-                        <h4 style="margin:0; color:var(--accent-primary); font-size:1.05rem;" id="summaryPatientNameLabel">
-                            👤 Клінічна динаміка: <span id="summaryPatientName" style="color:#ffffff; font-weight:700;">—</span>
-                        </h4>
-                        <span id="summaryProgressBadge" class="progress-badge">🔥 Прогрес: 0°</span>
-                    </div>
-                    <div class="summary-grid">
-                        <div class="summary-card">
-                            <div class="label">1-ша сесія (<span id="summaryStartDate">—</span>)</div>
-                            <div class="val" id="summaryStartAmp">0°</div>
-                        </div>
-                        <div class="summary-card">
-                            <div class="label">Поточна (<span id="summaryCurrentDate">—</span>)</div>
-                            <div class="val" id="summaryCurrentAmp" style="color:#00f2fe;">0°</div>
-                        </div>
-                        <div class="summary-card">
-                            <div class="label">Середня плавність</div>
-                            <div class="val" id="summaryAvgSmooth" style="color:#00e676;">0%</div>
-                        </div>
-                        <div class="summary-card">
-                            <div class="label">Індекс відновлення</div>
-                            <div class="val" id="recoveryIndexVal" style="color:#00e676;">0%</div>
-                        </div>
-                    </div>
-                    <div style="margin-top: 0.8rem; font-size: 0.82rem; color: var(--text-secondary); display: flex; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 0.6rem;">
-                        <span>Всього проведено сесій: <strong id="summaryTotalSessions" style="color:#fff;">0</strong></span>
-                        <span>Загальна кількість згинань: <strong id="summaryTotalFlexions" style="color:#fff;">0</strong></span>
-                    </div>
-                `;
-            }
-
+        const status = this.stateManager.get('sessionsStatus');
+        const view = status === 'loading' ? 'loading' : status === 'error' ? 'error'
+            : allSessionsData.length === 0 ? 'empty' : filtered.length === 0 ? 'noResults' : 'populated';
+        const states = { loading: 'doctorLoadingState', empty: 'doctorEmptyState', noResults: 'doctorNoResultsState', error: 'doctorErrorState' };
+        Object.entries(states).forEach(([key, id]) => { document.getElementById(id).hidden = view !== key; });
+        document.getElementById("tabDoctor").setAttribute("aria-busy", String(view === 'loading'));
+        document.getElementById("doctorNoResultsText").textContent = this.doctorSearchQuery
+            ? `За запитом «${this.doctorSearchQuery}» нічого не знайдено`
+            : `Для пацієнта «${this.selectedDoctorPatient}» немає сесій`;
+        document.getElementById("btnDownloadCSV").disabled = status !== 'ready' || allSessionsData.length === 0;
+        const showSummary = view === 'populated' && this.selectedDoctorPatient !== "ALL";
+        summaryBox.hidden = !showSummary;
+        document.getElementById("btnDownloadClientCSV").disabled = !showSummary;
+        document.getElementById("btnDeletePatient").disabled = !showSummary;
+        if (view !== 'populated') {
+            this.renderDoctorSessions([]);
+            return;
+        }
+        if (showSummary) {
             const chrono = filtered.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             const first = chrono[0];
             const latest = chrono[chrono.length - 1];
@@ -462,15 +423,25 @@ export class UIManager {
             document.getElementById("summaryCurrentDate").textContent = latest.dateStr || "Поточна";
 
             const diffAmp = (latest.amplitude || 0) - (first.amplitude || 0);
-            const percent = (first.amplitude && first.amplitude > 0) ? Math.round((diffAmp / first.amplitude) * 100) : 0;
+            const percent = first.amplitude > 0 ? Math.round((diffAmp / first.amplitude) * 100) : null;
             
             const badge = document.getElementById("summaryProgressBadge");
-            if (diffAmp >= 0) {
+            if (filtered.length === 1) {
+                badge.className = "progress-badge neutral";
+                badge.textContent = "Початкова сесія — базове значення";
+            } else if (diffAmp === 0) {
+                badge.className = "progress-badge neutral";
+                badge.textContent = "Без змін: 0.0°";
+            } else if (diffAmp > 0) {
                 badge.className = "progress-badge";
-                badge.textContent = `🔥 Прогрес: +${diffAmp.toFixed(1)}° (+${percent}%)`;
+                badge.textContent = `Зміна амплітуди: +${diffAmp.toFixed(1)}°`;
             } else {
                 badge.className = "progress-badge negative";
-                badge.textContent = `⚠️ Динаміка: ${diffAmp.toFixed(1)}° (${percent}%)`;
+                badge.textContent = `Зміна амплітуди: ${diffAmp.toFixed(1)}°`;
+            }
+            if (filtered.length > 1) {
+                badge.textContent += percent === null ? " (відсоток не визначено: база 0°)"
+                    : ` (${percent > 0 ? "+" : ""}${percent}%)`;
             }
 
             const avgSmooth = Math.round(filtered.reduce((sum, s) => sum + (s.smoothness || 0), 0) / filtered.length);
@@ -479,16 +450,10 @@ export class UIManager {
             const totalFlex = filtered.reduce((sum, s) => sum + (s.flexionsCount || 0), 0);
             document.getElementById("summaryTotalFlexions").textContent = `${totalFlex}`;
 
-            const recoveryIndex = Math.min(100, Math.round(((latest.amplitude || 0) / targetNorm) * 100));
             const recElem = document.getElementById("recoveryIndexVal");
             if (recElem) {
-                recElem.textContent = `${recoveryIndex}%`;
-                recElem.style.color = recoveryIndex >= 85 ? "#00e676" : (recoveryIndex >= 60 ? "#ff9100" : "#ff1744");
+                recElem.textContent = validNorm ? `${Math.round(((latest.amplitude || 0) / targetNorm) * 100)}%` : "—";
             }
-
-            summaryBox.style.display = "block";
-        } else if (summaryBox) {
-            summaryBox.style.display = "none";
         }
 
         this.renderDoctorSessions(filtered);
@@ -501,14 +466,7 @@ export class UIManager {
         tbody.innerHTML = "";
 
         if (sessions.length === 0) {
-            const tr = document.createElement("tr");
-            const td = document.createElement("td");
-            td.colSpan = 8;
-            td.style.cssText = "text-align:center; padding: 2.5rem 1rem; color: var(--text-secondary); background: rgba(0,0,0,0.15); border-radius: 8px; white-space: normal; word-break: break-word;";
-            td.textContent = "📭 Збережені сесії поки що відсутні для даного вибору. Проведіть тренування у вкладці пацієнта або змініть параметри пошуку.";
-            tr.appendChild(td);
-            tbody.appendChild(tr);
-            
+            this.updateChartData([]);
             if (chartWrap) chartWrap.style.display = "none";
             return;
         }
@@ -521,37 +479,46 @@ export class UIManager {
             const tr = document.createElement("tr");
             
             const tdName = document.createElement("td");
+            tdName.className = "session-patient";
+            tdName.dataset.label = "Пацієнт";
             tdName.style.cssText = "font-weight:700; color:var(--accent-primary); cursor:pointer; text-decoration: underline; text-underline-offset: 3px;";
             tdName.textContent = rec.patientId || "Пацієнт";
             tdName.onclick = () => this.selectPatientByPill(tdName.textContent, true);
             
             const tdDate = document.createElement("td");
-            tdDate.style.whiteSpace = "nowrap";
+            tdDate.dataset.label = "Дата і час";
             tdDate.textContent = rec.dateStr || "—";
             
             const tdMinMax = document.createElement("td");
-            tdMinMax.style.whiteSpace = "nowrap";
-            tdMinMax.innerHTML = `<span style="color:#cbd5e1; font-weight:600;">${(rec.minAngle||0).toFixed(1)}°</span> <span style="color:#64748b;">..</span> <span style="color:#00e676; font-weight:600;">${(rec.maxAngle||0).toFixed(1)}°</span>`;
+            tdMinMax.dataset.label = "Мін / Макс";
+            tdMinMax.innerHTML = `<span><span style="color:#cbd5e1; font-weight:600;">${(rec.minAngle||0).toFixed(1)}°</span> <span style="color:#64748b;">..</span> <span style="color:#00e676; font-weight:600;">${(rec.maxAngle||0).toFixed(1)}°</span></span>`;
             
             const tdAmp = document.createElement("td");
+            tdAmp.dataset.label = "Амплітуда";
             tdAmp.style.cssText = "color:#00f2fe; font-weight:700;";
             tdAmp.textContent = `${(rec.amplitude||0).toFixed(1)}°`;
             
             const tdSpeed = document.createElement("td");
+            tdSpeed.dataset.label = "Сер. швидкість";
             tdSpeed.textContent = `${(rec.avgSpeed||0).toFixed(1)}°/с`;
             
             const tdSmooth = document.createElement("td");
+            tdSmooth.dataset.label = "Плавність";
             tdSmooth.style.cssText = "color:#00e676; font-weight:700;";
             tdSmooth.textContent = `${(rec.smoothness||0).toFixed(0)}%`;
             
             const tdFlex = document.createElement("td");
+            tdFlex.dataset.label = "Згинання";
             tdFlex.textContent = rec.flexionsCount || 0;
             
             const tdActions = document.createElement("td");
+            tdActions.className = "session-actions";
+            tdActions.dataset.label = "Дія";
             tdActions.style.textAlign = "center";
             const btnDel = document.createElement("button");
-            btnDel.className = "btn";
-            btnDel.style.cssText = "padding: 0.25rem 0.6rem; font-size: 0.75rem; background: rgba(255,23,68,0.18); border-color: rgba(255,23,68,0.4); color: #ff1744;";
+            btnDel.className = "btn btn-delete-session";
+            btnDel.setAttribute("aria-label", "Видалити сесію");
+            btnDel.title = "Видалити сесію";
             btnDel.textContent = "🗑️";
             btnDel.onclick = () => {
                 if(confirm("Видалити запис?")) {
@@ -656,39 +623,18 @@ export class UIManager {
     }
 
     updateChartData(sessions) {
-        const wrapper = document.getElementById("chartWrapperContainer");
-        let chartEmptyState = document.getElementById("chartEmptyState");
-        
-        if (!chartEmptyState && wrapper && wrapper.parentElement) {
-            chartEmptyState = document.createElement("div");
-            chartEmptyState.id = "chartEmptyState";
-            chartEmptyState.style.cssText = "padding: 2.5rem 1rem; text-align: center; background: rgba(0, 242, 254, 0.05); border: 1px dashed rgba(0, 242, 254, 0.3); border-radius: 14px; margin-top: 1rem; display: none;";
-            chartEmptyState.innerHTML = `
-                <div style="font-size: 2.5rem; margin-bottom: 0.8rem;">📈</div>
-                <h3 style="color: #00f2fe; font-size: 1.1rem; margin-bottom: 0.4rem; font-weight: 700;">Графік динаміки</h3>
-                <p style="color: var(--text-secondary); font-size: 0.9rem; max-width: 400px; margin: 0 auto; line-height: 1.4;">Немає даних для побудови графіка.</p>
-            `;
-            wrapper.parentElement.insertBefore(chartEmptyState, wrapper);
-        }
-
-        if (!sessions || sessions.length === 0) {
-            if (wrapper) wrapper.style.display = "none";
-            if (chartEmptyState) chartEmptyState.style.display = "block";
-            return;
-        }
-
-        if (chartEmptyState) chartEmptyState.style.display = "none";
-        if (wrapper) wrapper.style.display = "block";
-
         if (this.doctorChart && typeof Chart !== "undefined") {
             const bubbleData = [];
             const bgColors = [];
             const borderColors = [];
+            let maxAmplitude = 0;
 
             sessions.forEach(s => {
-                const amp = s.amplitude || 0;
-                const smooth = s.smoothness || 0;
-                const flex = s.flexionsCount || 0;
+                const amp = s.amplitude ?? 0;
+                const smooth = s.smoothness ?? 0;
+                if (!Number.isFinite(amp) || !Number.isFinite(smooth) || amp < 0) return;
+                const flex = Number.isFinite(s.flexionsCount) ? Math.max(0, s.flexionsCount) : 0;
+                maxAmplitude = Math.max(maxAmplitude, amp);
                 
                 let color = "rgba(255, 145, 0, 0.7)"; // Оранжевая зона (Прогресс)
                 let border = "rgba(255, 145, 0, 1)";
@@ -716,6 +662,8 @@ export class UIManager {
             this.doctorChart.data.datasets[0].data = bubbleData;
             this.doctorChart.data.datasets[0].backgroundColor = bgColors;
             this.doctorChart.data.datasets[0].borderColor = borderColors;
+            const paddedMax = Math.ceil(maxAmplitude / 10 * 1.15) * 10;
+            this.doctorChart.options.scales.y.max = Math.max(180, Number.isFinite(paddedMax) ? paddedMax : maxAmplitude);
             this.doctorChart.update();
         }
     }
