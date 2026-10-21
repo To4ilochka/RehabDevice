@@ -131,7 +131,8 @@ export class GameEngine {
         // Smooth interpolation only for visual circle indicator
         const smoothingDuration = Math.max(1 / 15, this.angleSampleInterval);
         const alpha = 1.0 - Math.exp(-dt / smoothingDuration);
-        this.currentAngle = this.currentAngle + (targetAngle - this.currentAngle) * alpha;
+        const angleDelta = ((targetAngle - this.currentAngle + 180) % 360 + 360) % 360 - 180;
+        this.currentAngle = this.currentAngle + angleDelta * alpha;
         
         // Render UI circle indicator with smoothed angle
         const circle = document.getElementById("circleIndicator");
