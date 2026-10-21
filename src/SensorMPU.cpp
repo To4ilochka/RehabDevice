@@ -67,8 +67,14 @@ bool SensorMPU::init() {
         Serial.println("[SensorMPU] Enabling DMP...");
         mpu.setDMPEnabled(true);
 
+    #if MPU_USE_INTERRUPT
         pinMode(PIN_MPU_INT, INPUT);
         attachInterrupt(digitalPinToInterrupt(PIN_MPU_INT), dmpDataReadyISR, RISING);
+        Serial.println("[SensorMPU] Acquisition mode: interrupt.");
+    #else
+        Serial.printf("[SensorMPU] Acquisition mode: polling (%u ms), INT not required.\n",
+                  static_cast<unsigned>(MPU_POLL_INTERVAL_MS));
+    #endif
 
         mpuIntStatus = mpu.getIntStatus();
         packetSize = mpu.dmpGetFIFOPacketSize();

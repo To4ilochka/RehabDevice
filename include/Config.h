@@ -17,6 +17,14 @@
 #define SD_CS_PIN               5   // SPI Chip Select pin for SD Card Module
 
 // ============================================================================
+// MPU6050 SETTINGS
+// ============================================================================
+#ifndef MPU_USE_INTERRUPT
+#define MPU_USE_INTERRUPT       0
+#endif
+#define MPU_POLL_INTERVAL_MS    5
+
+// ============================================================================
 // WI-FI SOFTAP SETTINGS
 // ============================================================================
 #define WIFI_AP_SSID            "RehabDevice_AP"

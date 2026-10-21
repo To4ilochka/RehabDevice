@@ -36,8 +36,12 @@ void dbTask(void *pvParameters) {
 
 void sensorTask(void *pvParameters) {
     while (true) {
-        // Wait indefinitely for a notification from the ISR
+#if MPU_USE_INTERRUPT
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+#else
+        const TickType_t pollTicks = pdMS_TO_TICKS(MPU_POLL_INTERVAL_MS);
+        vTaskDelay(pollTicks > 0 ? pollTicks : 1);
+#endif
 
         sensor.update();
         if (sensor.isReady()) {
@@ -90,7 +94,7 @@ void setup() {
     // 3. Start asynchronous HTTP server and WebSockets
     webServer.init();
 
-    // 4. Initialize MPU6050 gyroscope/accelerometer (DMP + INT interrupts)
+    // 4. Initialize MPU6050 gyroscope/accelerometer
     if (!sensor.init()) {
         Serial.println("[Setup] WARNING: MPU6050 not initialized! Check wiring and connections.");
     }
