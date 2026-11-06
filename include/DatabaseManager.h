@@ -2,6 +2,7 @@
 #define DATABASE_MANAGER_H
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <sqlite3.h>
 #include <LittleFS.h>
 #include <freertos/semphr.h>
@@ -38,6 +39,9 @@ public:
     // long-lived streaming queries whose sqlite3_step calls happen across
     // multiple AsyncTCP callback invocations).
     int stepStatement(sqlite3_stmt* stmt);
+
+    // Step a prepared sessions query and read row columns under dbMutex.
+    int stepSessionRow(sqlite3_stmt* stmt, JsonDocument& doc);
 
     // Finalize a prepared statement, serialized against other DB access
     void finalizeStatement(sqlite3_stmt* stmt);

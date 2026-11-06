@@ -36,8 +36,12 @@ window.RehabGames['pingpong'] = class PingPongGame {
     init(canvas, options) {
         options = options || {};
         this.ctx = canvas.getContext("2d");
-        this.calibMin = options.calibMin ?? -20;
-        this.calibMax = options.calibMax ?? 20;
+        this.calibMin = Number.isFinite(options.calibMin) ? options.calibMin : -20;
+        this.calibMax = Number.isFinite(options.calibMax) ? options.calibMax : 20;
+        if (this.calibMax <= this.calibMin) {
+            this.calibMin = -20;
+            this.calibMax = 20;
+        }
         this.consecutiveHits = 0;
         
         this.resize(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
@@ -45,12 +49,12 @@ window.RehabGames['pingpong'] = class PingPongGame {
         this.playerY = this.height / 2 - this.paddleH / 2;
         this.botY = this.height / 2 - this.paddleH / 2;
         
-        this.updateHUD();
+        this.updateHUD("Очікування");
     }
     
     resize(width, height) {
-        this.width = width;
-        this.height = height;
+        this.width = Math.max(1, Number(width) || 1);
+        this.height = Math.max(1, Number(height) || 1);
         
         this.paddleW = Math.max(10, this.width * 0.015);
         this.paddleH = Math.max(60, this.height * 0.25);
@@ -82,9 +86,11 @@ window.RehabGames['pingpong'] = class PingPongGame {
     }
     
     mapAngleToScreen(angle) {
-        let clamped = Math.max(this.calibMin, Math.min(this.calibMax, angle));
-        let normalized = (clamped - this.calibMin) / (this.calibMax - this.calibMin);
-        if (isNaN(normalized)) normalized = 0.5;
+        const safeAngle = Number.isFinite(angle) ? angle : (this.calibMin + this.calibMax) / 2;
+        const clamped = Math.max(this.calibMin, Math.min(this.calibMax, safeAngle));
+        const range = this.calibMax - this.calibMin;
+        let normalized = range > 0 ? (clamped - this.calibMin) / range : 0.5;
+        if (!Number.isFinite(normalized)) normalized = 0.5;
         return (1 - normalized) * (this.height - this.paddleH);
     }
     
@@ -101,18 +107,21 @@ window.RehabGames['pingpong'] = class PingPongGame {
     
     update(currentAngle, dt) {
         // Запобігаємо стрибкам фізики при перемиканні вкладок браузера
-        if (dt > 0.1) dt = 0.016;
+        if (!Number.isFinite(dt) || dt < 0 || dt > 0.1) dt = 0.016;
 
+        const safeAngle = Number.isFinite(currentAngle) ? currentAngle : (this.calibMin + this.calibMax) / 2;
         let boundsChanged = false;
-        if (currentAngle > this.calibMax) { this.calibMax += (currentAngle - this.calibMax) * 0.05; boundsChanged = true; }
-        if (currentAngle < this.calibMin) { this.calibMin -= (this.calibMin - currentAngle) * 0.05; boundsChanged = true; }
+        if (Number.isFinite(currentAngle)) {
+            if (currentAngle > this.calibMax) { this.calibMax += (currentAngle - this.calibMax) * 0.05; boundsChanged = true; }
+            if (currentAngle < this.calibMin) { this.calibMin -= (this.calibMin - currentAngle) * 0.05; boundsChanged = true; }
+        }
         if (boundsChanged) {
             this.syncCalibration();
         }
         
         // Плавний рух ракетки гравця (Lerp)
-        let targetPlayerY = this.mapAngleToScreen(currentAngle);
-        if (!isNaN(targetPlayerY)) {
+        let targetPlayerY = this.mapAngleToScreen(safeAngle);
+        if (Number.isFinite(targetPlayerY)) {
             this.playerY += (targetPlayerY - this.playerY) * 15 * dt;
         }
         
@@ -228,6 +237,7 @@ window.RehabGames['pingpong'] = class PingPongGame {
     }
     
     draw(ctx) {
+        ctx.save();
         // Очищення фону
         ctx.fillStyle = '#0f172a';
         ctx.fillRect(0, 0, this.width, this.height);
@@ -268,9 +278,12 @@ window.RehabGames['pingpong'] = class PingPongGame {
             ctx.fillRect(this.ballX, this.ballY, this.ballSize, this.ballSize);
         }
         ctx.shadowBlur = 0;
+        ctx.restore();
     }
     
     stop() {
-        // Очищення специфічних ресурсів для Ping-Pong, якщо вони додадуться
+        this.ballVX = 0;
+        this.ballVY = 0;
+        this.currentBallSpeed = 0;
     }
 };

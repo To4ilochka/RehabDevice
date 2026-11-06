@@ -60,6 +60,7 @@ private:
     enum CalibrationState { CAL_IDLE, CAL_WAITING_FIFO };
     CalibrationState calState;
     uint32_t calWaitStartTime;
+    bool recalibratePending;
 };
 
 #endif // SENSOR_MPU_H

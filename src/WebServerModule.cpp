@@ -96,22 +96,10 @@ public:
 
             if (_isDone) break;
 
-            int rc = dbManager.stepStatement(_stmt);
+            JsonDocument doc;
+            int rc = dbManager.stepSessionRow(_stmt, doc);
             
             if (rc == SQLITE_ROW) {
-                JsonDocument doc;
-                doc["id"] = sqlite3_column_int(_stmt, 0);
-                doc["patientId"] = sqlite3_column_text(_stmt, 1) ? (const char*)sqlite3_column_text(_stmt, 1) : "";
-                doc["timestamp"] = sqlite3_column_int(_stmt, 2);
-                doc["dateStr"] = sqlite3_column_text(_stmt, 3) ? (const char*)sqlite3_column_text(_stmt, 3) : "";
-                doc["minAngle"] = sqlite3_column_double(_stmt, 4);
-                doc["maxAngle"] = sqlite3_column_double(_stmt, 5);
-                doc["amplitude"] = sqlite3_column_double(_stmt, 6);
-                doc["avgSpeed"] = sqlite3_column_double(_stmt, 7);
-                doc["smoothness"] = sqlite3_column_double(_stmt, 8);
-                doc["flexionsCount"] = sqlite3_column_int(_stmt, 9);
-                doc["sessionDuration"] = sqlite3_column_double(_stmt, 10);
-                
                 size_t needed = measureMsgPack(doc);
                 if (written + needed > maxLen) {
                     _pendingDoc = doc;
@@ -137,6 +125,8 @@ void WebServerModule::setupRoutes() {
         bool active = analytics->isSessionActive();
         SessionRecord rec = analytics->getCurrentRecord();
         MPUData mpu = sensor->peekData();
+        const float safeRoll = isfinite(mpu.roll) ? mpu.roll : 0.0f;
+        const float safePitch = isfinite(mpu.pitch) ? mpu.pitch : 0.0f;
         
         JsonDocument doc;
         doc["type"] = "status";
@@ -145,9 +135,9 @@ void WebServerModule::setupRoutes() {
         doc["totalBytes"] = 0;
         doc["sessionActive"] = active;
         doc["patientId"] = rec.patientId;
-        doc["angle"] = serialized(String(mpu.roll, 2));
-        doc["roll"] = mpu.roll;
-        doc["pitch"] = mpu.pitch;
+        doc["angle"] = serialized(String(safeRoll, 2));
+        doc["roll"] = safeRoll;
+        doc["pitch"] = safePitch;
         doc["sdAvailable"] = dbManager.isSDAvailable();
         doc["sensorMutexMisses"] = sensor->getMutexMissCount();
         
@@ -184,29 +174,33 @@ void WebServerModule::setupRoutes() {
                 settimeofday(&tv, NULL);
             }
         } else if (action == "startSession") {
-            if (request->hasArg("patientId")) {
+            if (request->hasArg("patientId") && sysCommandQueue != NULL) {
                 SysCommandMsg msg = {};
                 msg.cmd = CMD_START_SESSION;
                 strncpy(msg.patientId, request->arg("patientId").c_str(), sizeof(msg.patientId) - 1);
                 xQueueSend(sysCommandQueue, &msg, 0);
             }
         } else if (action == "stopSession") {
-            SysCommandMsg msg = {};
-            msg.cmd = CMD_STOP_SESSION;
-            xQueueSend(sysCommandQueue, &msg, 0);
+            if (sysCommandQueue != NULL) {
+                SysCommandMsg msg = {};
+                msg.cmd = CMD_STOP_SESSION;
+                xQueueSend(sysCommandQueue, &msg, 0);
+            }
         } else if (action == "recalibrate") {
-            SysCommandMsg msg = {};
-            msg.cmd = CMD_RECALIBRATE;
-            xQueueSend(sysCommandQueue, &msg, 0);
+            if (sysCommandQueue != NULL) {
+                SysCommandMsg msg = {};
+                msg.cmd = CMD_RECALIBRATE;
+                xQueueSend(sysCommandQueue, &msg, 0);
+            }
         } else if (action == "deletePatient") {
-            if (request->hasArg("patientId")) {
+            if (request->hasArg("patientId") && sysCommandQueue != NULL) {
                 SysCommandMsg msg = {};
                 msg.cmd = CMD_DELETE_PATIENT;
                 strncpy(msg.patientId, request->arg("patientId").c_str(), sizeof(msg.patientId) - 1);
                 xQueueSend(sysCommandQueue, &msg, 0);
             }
         } else if (action == "deleteSession") {
-            if (request->hasArg("id")) {
+            if (request->hasArg("id") && sysCommandQueue != NULL) {
                 SysCommandMsg msg = {};
                 msg.cmd = CMD_DELETE_SESSION;
                 msg.sessionId = request->arg("id").toInt();
@@ -269,36 +263,51 @@ void WebServerModule::handleWebSocketMessage(AsyncWebSocketClient* client, uint8
             settimeofday(&tv, NULL);
         }
     } else if (cmd == "startSession") {
-        SysCommandMsg msg = {};
-        msg.cmd = CMD_START_SESSION;
-        strncpy(msg.patientId, doc["patientId"].as<const char*>(), sizeof(msg.patientId) - 1);
-        xQueueSend(sysCommandQueue, &msg, 0);
+        const char* patientId = doc["patientId"].as<const char*>();
+        if (patientId && sysCommandQueue != NULL) {
+            SysCommandMsg msg = {};
+            msg.cmd = CMD_START_SESSION;
+            strncpy(msg.patientId, patientId, sizeof(msg.patientId) - 1);
+            xQueueSend(sysCommandQueue, &msg, 0);
+        }
     } else if (cmd == "stopSession") {
-        SysCommandMsg msg = {};
-        msg.cmd = CMD_STOP_SESSION;
-        xQueueSend(sysCommandQueue, &msg, 0);
+        if (sysCommandQueue != NULL) {
+            SysCommandMsg msg = {};
+            msg.cmd = CMD_STOP_SESSION;
+            xQueueSend(sysCommandQueue, &msg, 0);
+        }
     } else if (cmd == "recalibrate") {
-        SysCommandMsg msg = {};
-        msg.cmd = CMD_RECALIBRATE;
-        xQueueSend(sysCommandQueue, &msg, 0);
+        if (sysCommandQueue != NULL) {
+            SysCommandMsg msg = {};
+            msg.cmd = CMD_RECALIBRATE;
+            xQueueSend(sysCommandQueue, &msg, 0);
+        }
     } else if (cmd == "deletePatient") {
-        SysCommandMsg msg = {};
-        msg.cmd = CMD_DELETE_PATIENT;
-        strncpy(msg.patientId, doc["patientId"].as<const char*>(), sizeof(msg.patientId) - 1);
-        xQueueSend(sysCommandQueue, &msg, 0);
+        const char* patientId = doc["patientId"].as<const char*>();
+        if (patientId && sysCommandQueue != NULL) {
+            SysCommandMsg msg = {};
+            msg.cmd = CMD_DELETE_PATIENT;
+            strncpy(msg.patientId, patientId, sizeof(msg.patientId) - 1);
+            xQueueSend(sysCommandQueue, &msg, 0);
+        }
     } else if (cmd == "deleteSession") {
-        SysCommandMsg msg = {};
-        msg.cmd = CMD_DELETE_SESSION;
-        msg.sessionId = doc["id"].as<int>();
-        xQueueSend(sysCommandQueue, &msg, 0);
+        if (sysCommandQueue != NULL) {
+            SysCommandMsg msg = {};
+            msg.cmd = CMD_DELETE_SESSION;
+            msg.sessionId = doc["id"].as<int>();
+            xQueueSend(sysCommandQueue, &msg, 0);
+        }
     }
 }
 
 void WebServerModule::broadcastAngle(float roll, float pitch) {
     if (ws.count() == 0) return;
 
+    const float safeRoll = isfinite(roll) ? roll : 0.0f;
+    const float safePitch = isfinite(pitch) ? pitch : 0.0f;
+
     char buf[96];
-    snprintf(buf, sizeof(buf), "{\"type\":\"angle\",\"angle\":%.2f,\"roll\":%.2f,\"pitch\":%.2f}", roll, roll, pitch);
+    snprintf(buf, sizeof(buf), "{\"type\":\"angle\",\"angle\":%.2f,\"roll\":%.2f,\"pitch\":%.2f}", safeRoll, safeRoll, safePitch);
     
     for (auto& client : ws.getClients()) {
         if (client.status() == WS_CONNECTED && client.canSend()) {

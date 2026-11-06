@@ -558,7 +558,7 @@ export class UIManager {
                 
                 ctx.save();
                 
-                // Тревожная зона: X=0..40, Y=0..50
+                // Тривожна зона: X=0..40, Y=0..50
                 const xRedStart = x.getPixelForValue(0);
                 const xRedEnd = x.getPixelForValue(40);
                 const yRedStart = y.getPixelForValue(50);
@@ -567,7 +567,7 @@ export class UIManager {
                 ctx.fillStyle = 'rgba(255, 23, 68, 0.05)';
                 ctx.fillRect(xRedStart, yRedStart, xRedEnd - xRedStart, yRedEnd - yRedStart);
                 
-                // Целевая зона: X=60..100, Y=80..180
+                // Цільова зона: X=60..100, Y=80..180
                 const xGreenStart = x.getPixelForValue(60);
                 const xGreenEnd = x.getPixelForValue(100);
                 const yGreenStart = y.getPixelForValue(180);
@@ -646,14 +646,14 @@ export class UIManager {
                 const flex = Number.isFinite(s.flexionsCount) ? Math.max(0, s.flexionsCount) : 0;
                 maxAmplitude = Math.max(maxAmplitude, amp);
                 
-                let color = "rgba(255, 145, 0, 0.7)"; // Оранжевая зона (Прогресс)
+                let color = "rgba(255, 145, 0, 0.7)"; // Помаранчева зона (Прогрес)
                 let border = "rgba(255, 145, 0, 1)";
                 
                 if (amp >= 80 && smooth >= 60) {
-                    color = "rgba(0, 230, 118, 0.7)"; // Зеленая зона (Норма)
+                    color = "rgba(0, 230, 118, 0.7)"; // Зелена зона (Норма)
                     border = "rgba(0, 230, 118, 1)";
                 } else if (amp < 50 || smooth < 40) {
-                    color = "rgba(255, 23, 68, 0.7)"; // Красная зона (Проблема)
+                    color = "rgba(255, 23, 68, 0.7)"; // Червона зона (Проблема)
                     border = "rgba(255, 23, 68, 1)";
                 }
 

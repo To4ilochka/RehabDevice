@@ -1,7 +1,11 @@
 const TWO_DIRECTION = "two-direction";
 const FOUR_DIRECTION = "four-direction";
 
-const shortestAngleDelta = (angle, origin) => ((angle - origin + 540) % 360) - 180;
+const shortestAngleDelta = (angle, origin) => {
+    const delta = Number(angle) - Number(origin);
+    if (!Number.isFinite(delta)) return 0;
+    return ((delta + 180) % 360 + 360) % 360 - 180;
+};
 
 export class GameInput {
     constructor() {
@@ -20,20 +24,32 @@ export class GameInput {
     }
 
     configure({ deadzone = this.deadzone, sensitivityDeg = this.sensitivityDeg } = {}) {
-        this.deadzone = Math.max(0, Math.min(0.95, Number(deadzone) || 0));
-        this.sensitivityDeg = Math.max(1, Number(sensitivityDeg) || this.sensitivityDeg);
+        const nextDeadzone = Number(deadzone);
+        const nextSensitivity = Number(sensitivityDeg);
+        if (Number.isFinite(nextDeadzone)) {
+            this.deadzone = Math.max(0, Math.min(0.95, nextDeadzone));
+        }
+        if (Number.isFinite(nextSensitivity) && nextSensitivity > 0) {
+            this.sensitivityDeg = Math.max(1, nextSensitivity);
+        }
     }
 
     tare() {
-        this.rollTare = this.roll;
-        this.pitchTare = this.pitch;
+        if (Number.isFinite(this.roll)) this.rollTare = this.roll;
+        if (Number.isFinite(this.pitch)) this.pitchTare = this.pitch;
     }
 
-    normalize(angle, origin) {
-        const scaled = Math.max(-1, Math.min(1, shortestAngleDelta(angle, origin) / this.sensitivityDeg));
+    normalize(angle, origin = 0) {
+        const numAngle = Number(angle);
+        const numOrigin = Number(origin);
+        if (!Number.isFinite(numAngle) || !Number.isFinite(numOrigin)) return 0;
+        const sensitivity = Number.isFinite(this.sensitivityDeg) && this.sensitivityDeg > 0 ? this.sensitivityDeg : 30;
+        const deadzone = Number.isFinite(this.deadzone) ? Math.max(0, Math.min(0.95, this.deadzone)) : 0.08;
+        const scaled = Math.max(-1, Math.min(1, shortestAngleDelta(numAngle, numOrigin) / sensitivity));
         const magnitude = Math.abs(scaled);
-        if (magnitude <= this.deadzone) return 0;
-        return Math.sign(scaled) * (magnitude - this.deadzone) / (1 - this.deadzone);
+        if (!Number.isFinite(magnitude) || magnitude <= deadzone) return 0;
+        const normalized = Math.sign(scaled) * (magnitude - deadzone) / (1 - deadzone);
+        return Math.max(-1, Math.min(1, normalized));
     }
 
     get horizontal() {
@@ -72,6 +88,8 @@ export class GameEngine {
         this.lastAngleSampleTime = null;
         this.angleSampleInterval = 1 / 20;
         this.isRunning = false;
+        this.loadRequestId = 0;
+        this.loadingScripts = new Map();
         this.applyInputMode();
         
         this.api = {
@@ -80,7 +98,11 @@ export class GameEngine {
                 if (el) el.textContent = value;
             },
             updateCalibration: (min, max) => {
-                this.stateManager.updateMultiple({ calibMin: min, calibMax: max });
+                const safeMin = Number(min);
+                const safeMax = Number(max);
+                if (Number.isFinite(safeMin) && Number.isFinite(safeMax) && safeMax >= safeMin) {
+                    this.stateManager.updateMultiple({ calibMin: safeMin, calibMax: safeMax });
+                }
             },
             setCustomHTML: (htmlString) => {
                 const container = document.getElementById("custom-game-ui");
@@ -98,7 +120,7 @@ export class GameEngine {
             }
         };
 
-        window.addEventListener('resize', () => {
+        this.handleResize = () => {
             if (this.activeGame && this.isRunning) {
                 const canvas = document.getElementById("mainGameCanvas");
                 if (canvas) {
@@ -106,13 +128,14 @@ export class GameEngine {
                     if (this.activeGame.resize) this.activeGame.resize(size.width, size.height);
                 }
             }
-        });
+        };
+        window.addEventListener('resize', this.handleResize);
     }
 
     resizeCanvas(canvas) {
-        const bounds = canvas.parentElement.getBoundingClientRect();
-        const width = Math.max(1, Math.round(bounds.width));
-        const height = Math.max(1, Math.round(bounds.height));
+        const bounds = canvas.parentElement ? canvas.parentElement.getBoundingClientRect() : canvas.getBoundingClientRect();
+        const width = Math.max(1, Math.round(bounds.width || canvas.clientWidth || 1));
+        const height = Math.max(1, Math.round(bounds.height || canvas.clientHeight || 1));
         const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
         const backingWidth = Math.round(width * pixelRatio);
         const backingHeight = Math.round(height * pixelRatio);
@@ -128,8 +151,23 @@ export class GameEngine {
     }
 
     start() {
+        if (this.animationId !== null) {
+            cancelAnimationFrame(this.animationId);
+            this.animationId = null;
+        }
+        window.removeEventListener('resize', this.handleResize);
+        window.addEventListener('resize', this.handleResize);
         this.lastTime = performance.now();
         this.loop(this.lastTime);
+    }
+
+    stop() {
+        this.stopGame();
+        if (this.animationId !== null) {
+            cancelAnimationFrame(this.animationId);
+            this.animationId = null;
+        }
+        window.removeEventListener('resize', this.handleResize);
     }
 
     setTargetAngle(angle) {
@@ -169,24 +207,45 @@ export class GameEngine {
         if (window.RehabGames[gameId]) {
             return callback();
         }
+        if (this.loadingScripts.has(gameId)) {
+            this.loadingScripts.get(gameId).push(callback);
+            return;
+        }
+        const callbacks = [callback];
+        this.loadingScripts.set(gameId, callbacks);
         const script = document.createElement('script');
         script.src = `/games/${gameId}/game.js`;
-        script.onload = callback;
+        script.onload = () => {
+            const pending = this.loadingScripts.get(gameId) || [];
+            this.loadingScripts.delete(gameId);
+            pending.forEach(cb => cb());
+        };
+        script.onerror = () => {
+            this.loadingScripts.delete(gameId);
+            script.remove();
+            const title = document.getElementById("gamePlaceholderTitle");
+            if (title) title.textContent = "Помилка завантаження гри";
+        };
         document.body.appendChild(script);
     }
 
     startGame(gameId) {
+        const requestId = ++this.loadRequestId;
         this.loadGame(gameId, () => {
+            if (requestId !== this.loadRequestId) return;
             const canvas = document.getElementById("mainGameCanvas");
+            const GameClass = window.RehabGames?.[gameId];
+            if (!canvas || typeof GameClass !== "function") return;
             
             if (this.activeGame && this.activeGame.stop) {
                 this.activeGame.stop();
             }
             this.api.clearCustomHTML();
+            this.api.updateHUD("hudScore", "");
+            this.api.updateHUD("hudBotState", "Стан: Очікування");
 
-            const { ctx } = this.resizeCanvas(canvas);
+            const { ctx, width, height } = this.resizeCanvas(canvas);
             
-            const GameClass = window.RehabGames[gameId];
             GameClass.inputRequirements = GameClass.inputRequirements || { directions: 2 };
             this.activeGame = new GameClass(ctx, this.api);
             this.applyInputMode();
@@ -201,9 +260,14 @@ export class GameEngine {
                 inputMode: this.input.mode,
                 inputRequirements: GameClass.inputRequirements
             });
+            if (this.activeGame.resize) {
+                this.activeGame.resize(width, height);
+            }
             
-            document.getElementById("gamePlaceholder").style.display = "none";
-            document.getElementById("gameHUD").style.display = "flex";
+            const ph = document.getElementById("gamePlaceholder");
+            if (ph) ph.style.display = "none";
+            const hud = document.getElementById("gameHUD");
+            if (hud) hud.style.display = "flex";
             
             if (!this.isRunning) {
                 this.isRunning = true;
@@ -212,6 +276,7 @@ export class GameEngine {
     }
 
     stopGame() {
+        this.loadRequestId++;
         this.isRunning = false;
         if (this.activeGame && this.activeGame.stop) {
             this.activeGame.stop();
@@ -219,6 +284,22 @@ export class GameEngine {
         this.activeGame = null;
         this.applyInputMode();
         this.api.clearCustomHTML();
+        this.api.updateHUD("hudScore", "");
+        this.api.updateHUD("hudBotState", "Стан: Очікування");
+
+        const canvas = document.getElementById("mainGameCanvas");
+        if (canvas) {
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = 1;
+                ctx.setLineDash([]);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
+            }
+        }
         
         const ph = document.getElementById("gamePlaceholder");
         if (ph) ph.style.display = "flex";
@@ -233,11 +314,14 @@ export class GameEngine {
     }
 
     loop = (time) => {
-        let dt = (time - this.lastTime) / 1000;
-        this.lastTime = time;
-        if (dt > 0.1) dt = 0.016;
+        const now = Number.isFinite(time) ? time : performance.now();
+        let dt = (now - this.lastTime) / 1000;
+        this.lastTime = now;
+        if (!Number.isFinite(dt) || dt < 0 || dt > 0.1) dt = 0.016;
         
-        const targetAngle = this.stateManager.get('targetAngle');
+        const rawTargetAngle = Number(this.stateManager.get('targetAngle'));
+        const targetAngle = Number.isFinite(rawTargetAngle) ? rawTargetAngle : this.input.roll;
+        if (!Number.isFinite(this.currentAngle)) this.currentAngle = targetAngle;
         
         // Smooth interpolation only for visual circle indicator
         const smoothingDuration = Math.max(1 / 15, this.angleSampleInterval);
@@ -254,11 +338,16 @@ export class GameEngine {
         if (this.isRunning && this.activeGame) {
             // Games receive RAW targetAngle for instant reaction (no smoothing delay)
             this.activeGame.update(targetAngle, dt, this.input);
-            this.activeGame.draw(document.getElementById("mainGameCanvas").getContext("2d"));
+            const canvas = document.getElementById("mainGameCanvas");
+            if (canvas && this.activeGame) {
+                this.activeGame.draw(canvas.getContext("2d"));
+            }
             
-            const min = this.stateManager.get('calibMin');
-            const max = this.stateManager.get('calibMax');
-            this.api.updateHUD("hudAmplitude", `Амплітуда: [${min.toFixed(1)}° .. ${max.toFixed(1)}°]`);
+            const min = Number(this.stateManager.get('calibMin'));
+            const max = Number(this.stateManager.get('calibMax'));
+            const safeMin = Number.isFinite(min) ? min : -20;
+            const safeMax = Number.isFinite(max) ? max : 20;
+            this.api.updateHUD("hudAmplitude", `Амплітуда: [${safeMin.toFixed(1)}° .. ${safeMax.toFixed(1)}°]`);
         }
         
         this.animationId = requestAnimationFrame(this.loop);

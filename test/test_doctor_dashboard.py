@@ -293,6 +293,7 @@ class DoctorDashboardTests(unittest.TestCase):
             ("pingpong", "PingPongGame"),
             ("balanceboard", "BalanceBoardGame"),
             ("cardodge", "CarDodgeGame"),
+            ("balance3d", "Balance3DGame"),
         ]:
             self.page.evaluate("""gameId => {
                 document.getElementById('gameContainer').style.display = 'flex';
@@ -302,11 +303,17 @@ class DoctorDashboardTests(unittest.TestCase):
                 "className => engine.activeGame && engine.activeGame.constructor.name === className",
                 arg=class_name,
             )
-            self.page.evaluate("""() => {
+            game_check = self.page.evaluate("""() => {
                 const game = engine.activeGame;
-                game.update(0, 0);
-                game.draw(document.getElementById('mainGameCanvas').getContext('2d'));
+                const ctx = document.getElementById('mainGameCanvas').getContext('2d');
+                game.update(0, 0, engine.input);
+                game.update(NaN, NaN, engine.input);
+                game.update(Infinity, -1, engine.input);
+                game.draw(ctx);
+                return Number.isFinite(state.get('calibMin')) && Number.isFinite(state.get('calibMax'))
+                    && document.documentElement.scrollWidth <= innerWidth;
             }""")
+            self.assertTrue(game_check, f"{game_id} failed non-finite input or viewport check")
             self.page.evaluate("engine.stopGame()")
 
 
@@ -382,6 +389,8 @@ class DoctorDashboardTests(unittest.TestCase):
             input.tare();
             input.setAngles(22, 27);
             const insideDeadzone = input.getAxis('Horizontal');
+            const nonFiniteAxis = input.normalize(NaN, 0);
+            const largeNegativeWrap = input.normalize(-705, 0);
 
             const engine = new GameEngine(state);
             window.engineInstance = engine;
@@ -408,14 +417,16 @@ class DoctorDashboardTests(unittest.TestCase):
             engine.activeGame = null;
             engine.applyInputMode();
             return {horizontal, verticalInTwoDirectionMode, verticalInFourDirectionMode,
-                insideDeadzone, initialMode, selectedFourDirectionMode, requiredMode, taredRoll, taredPitch,
-                restoredMode: selector.value, controlsFit,
+                insideDeadzone, nonFiniteAxis, largeNegativeWrap, initialMode, selectedFourDirectionMode,
+                requiredMode, taredRoll, taredPitch, restoredMode: selector.value, controlsFit,
                 controlBounds: {viewport: innerWidth, mode: modeBounds.toJSON(), tare: tareBounds.toJSON()}};
         }""")
         self.assertAlmostEqual(result["horizontal"], (0.5 - 0.08) / 0.92)
         self.assertEqual(result["verticalInTwoDirectionMode"], 0)
         self.assertAlmostEqual(result["verticalInFourDirectionMode"], (0.5 - 0.08) / 0.92)
         self.assertEqual(result["insideDeadzone"], 0)
+        self.assertEqual(result["nonFiniteAxis"], 0)
+        self.assertAlmostEqual(result["largeNegativeWrap"], (0.25 - 0.08) / 0.92)
         self.assertEqual(result["initialMode"], "two-direction")
         self.assertTrue(result["controlsFit"], result["controlBounds"])
         self.assertEqual(result["selectedFourDirectionMode"], "four-direction")
