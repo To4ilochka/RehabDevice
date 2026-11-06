@@ -887,7 +887,7 @@ tr:hover td {
 .active-patient-badge { padding: 1rem; background: rgba(0, 230, 118, 0.1); border: 1px solid rgba(0, 230, 118, 0.3); border-radius: 12px; }
 .active-patient-title { font-size: 1.25rem; color: var(--accent-green); margin-top: 0.25rem; }
 .select-dark { flex: 1; min-width: 0; max-width: 100%; padding: 0.65rem 0.75rem; color: #ffffff; background-color: #1e293b; -webkit-appearance: none; appearance: none; }
-#authActivePanel .game-input-controls { min-width: 0; }
+.game-input-controls { min-width: 0; }
 #gameInputMode, #gameSelect { min-width: 0; width: 100%; }
 .game-launch-row { align-items: stretch; min-width: 0; flex-wrap: wrap; }
 .game-launch-row #gameSelect { flex: 1 1 10.5rem; }

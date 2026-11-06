@@ -52,6 +52,15 @@
                         <div class="card-title">🔐 Авторизація Сесії</div>
                     </div>
 
+                    <!-- Sensor Motion Mode (available with or without active session) -->
+                    <div class="input-group game-input-controls">
+                        <label for="gameInputMode">Режим рухів датчика</label>
+                        <select id="gameInputMode" class="input-field select-dark">
+                            <option value="two-direction" selected>↔ 2 напрямки (вліво / вправо)</option>
+                            <option value="four-direction">↕ 4 напрямки (баланс-дошка 360°)</option>
+                        </select>
+                    </div>
+
                     <!-- Guest mode panel (before authorization) -->
                     <div id="authGuestPanel" class="flex-col gap-m">
                         <div class="input-group">
@@ -71,18 +80,9 @@
                             <h3 id="activePatientName" class="active-patient-title">Пацієнт</h3>
                         </div>
 
-                        <!-- Step 1: Choose 2-direction vs 4-direction sensor mode -->
-                        <div class="input-group game-input-controls">
-                            <label for="gameInputMode">1. Режим рухів датчика</label>
-                            <select id="gameInputMode" class="input-field select-dark">
-                                <option value="two-direction" selected>↔ 2 напрямки (вліво / вправо)</option>
-                                <option value="four-direction">↕ 4 напрямки (баланс-дошка 360°)</option>
-                            </select>
-                        </div>
-
-                        <!-- Step 2: Filtered Game Launch Dropdown -->
+                        <!-- Filtered Game Launch Dropdown -->
                         <div class="input-group">
-                            <label for="gameSelect" id="gameSelectLabel">2. Оберіть гру (2 напрямки)</label>
+                            <label for="gameSelect" id="gameSelectLabel">Оберіть гру (2 напрямки)</label>
                             <div class="flex-row gap-s game-launch-row">
                                 <select id="gameSelect" class="input-field select-dark">
                                     <option value="pingpong" data-directions="2" style="color: #ffffff;">🎮 Пінг-понг (Smart Bot)</option>

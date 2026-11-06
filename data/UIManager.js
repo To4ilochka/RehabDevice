@@ -161,8 +161,8 @@ export class UIManager {
         const gameSelectLabel = document.getElementById("gameSelectLabel");
         if (gameSelectLabel) {
             gameSelectLabel.textContent = isFourWay
-                ? "2. Оберіть гру (4 напрямки)"
-                : "2. Оберіть гру (2 напрямки)";
+                ? "Оберіть гру (4 напрямки)"
+                : "Оберіть гру (2 напрямки)";
         }
 
         const fourWayOrientation = document.getElementById("fourWayOrientationControls");

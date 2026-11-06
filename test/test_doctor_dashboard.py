@@ -567,6 +567,9 @@ class DoctorDashboardTests(unittest.TestCase):
             const initialBalanceVisualizerHidden = document.getElementById('balanceBoardVisualizer').hidden;
             const noDuplicateTareInPatientTab = !document.querySelector('#tabPatient #btnTareGameInput')
                 && !!document.querySelector('#gameContainer #btnTareGameInput');
+            const modeSelectVisibleWithoutSession = selector.getBoundingClientRect().width > 0
+                && window.getComputedStyle(document.getElementById('authActivePanel')).display === 'none'
+                && window.getComputedStyle(document.getElementById('authGuestPanel')).display !== 'none';
 
             document.getElementById('authActivePanel').style.display = 'flex';
             const modeBounds = selector.getBoundingClientRect();
@@ -615,7 +618,8 @@ class DoctorDashboardTests(unittest.TestCase):
                 insideDeadzone, nonFiniteAxis, largeNegativeWrap, initialMode,
                 twoWayGames, fourWayGames, restoredTwoWayGames,
                 initialFourWayControlsHidden, initialBalanceVisualizerHidden, fourWayControlsVisible,
-                noDuplicateTareInPatientTab, fourWaySensitivity, twoWaySensitivity,
+                noDuplicateTareInPatientTab, modeSelectVisibleWithoutSession,
+                fourWaySensitivity, twoWaySensitivity,
                 selectedFourDirectionMode, requiredMode, taredRoll, taredPitch,
                 restoredMode: selector.value, recalCommandSent, controlsFit,
                 controlBounds: {
@@ -641,6 +645,7 @@ class DoctorDashboardTests(unittest.TestCase):
         self.assertTrue(result["initialBalanceVisualizerHidden"])
         self.assertTrue(result["fourWayControlsVisible"])
         self.assertTrue(result["noDuplicateTareInPatientTab"])
+        self.assertTrue(result["modeSelectVisibleWithoutSession"])
         self.assertEqual(result["fourWaySensitivity"], 15)
         self.assertEqual(result["twoWaySensitivity"], 30)
         self.assertTrue(result["controlsFit"], result["controlBounds"])
