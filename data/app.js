@@ -19,8 +19,10 @@ function initApp() {
     networkService.onMessage((data) => {
         if (data.type === "angle") {
             const invertToggle = document.getElementById("invertAngleToggle");
-            const angle = invertToggle && invertToggle.checked ? -data.angle : data.angle;
-            gameEngine.setTargetAngle(angle);
+            const invert = invertToggle && invertToggle.checked ? -1 : 1;
+            const roll = Number(data.roll ?? data.angle ?? 0) * invert;
+            const pitch = Number(data.pitch ?? 0) * invert;
+            gameEngine.setTargetAngles(roll, pitch);
         } else if (data.type === "status") {
             stateManager.updateMultiple({
                 globalSdAvailable: data.sdAvailable !== false,

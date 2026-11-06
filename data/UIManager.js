@@ -287,6 +287,16 @@ export class UIManager {
         const btnModeGame = document.getElementById("btnModeGame");
         const btnExitGame = document.getElementById("btnExitGame");
         const gameContainer = document.getElementById("gameContainer");
+        const gameInputMode = document.getElementById("gameInputMode");
+        const btnTareGameInput = document.getElementById("btnTareGameInput");
+
+        gameInputMode?.addEventListener("change", () => {
+            window.engineInstance?.setInputMode(gameInputMode.value);
+        });
+
+        btnTareGameInput?.addEventListener("click", () => {
+            window.engineInstance?.tareInput();
+        });
 
         if (btnModeGame) {
             btnModeGame.addEventListener("click", () => {

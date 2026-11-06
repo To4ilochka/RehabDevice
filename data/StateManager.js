@@ -9,6 +9,8 @@ export class StateManager {
             globalSdAvailable: null,
             currentFirmwareVersion: "unknown",
             targetAngle: 0,
+            targetPitch: 0,
+            gameInputMode: "two-direction",
             calibMin: -20,
             calibMax: 20,
             isConnected: false,

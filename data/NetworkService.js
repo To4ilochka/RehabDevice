@@ -80,7 +80,8 @@ export class NetworkService {
                 this.notifyStatus(true, true);
                 this.notifyMessage(data);
                 if (data.angle !== undefined) {
-                    this.notifyMessage({ type: "angle", angle: data.angle });
+                    const roll = data.roll ?? data.angle;
+                    this.notifyMessage({ type: "angle", angle: roll, roll, pitch: data.pitch ?? 0 });
                 }
             }).catch(() => {
                 this.notifyStatus(false, true);

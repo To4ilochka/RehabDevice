@@ -18,8 +18,8 @@ public:
     // Initialize HTTP server routes and WebSocket handlers
     void init();
     
-    // Broadcast real-time wrist angle to all connected WebSocket clients
-    void broadcastAngle(float angle);
+    // Broadcast real-time wrist tilt to all connected WebSocket clients
+    void broadcastAngle(float roll, float pitch);
     
     // Broadcast memory usage, connected clients count, and session recording status
     void broadcastStatus();

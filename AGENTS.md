@@ -101,10 +101,10 @@ The web server is started before `sysCommandQueue` is created. If changing start
 
 | Interface | Current contract |
 |---|---|
-| `GET /api/status` | JSON status, connected-client count, session/patient state, current angle, SD availability, and sensor mutex misses. `usedBytes` and `totalBytes` are hard-coded to zero. This route does not set firmware version. |
+| `GET /api/status` | JSON status, connected-client count, session/patient state, current `angle` (roll compatibility alias), numeric `roll` and `pitch`, SD availability, and sensor mutex misses. `usedBytes` and `totalBytes` are hard-coded to zero. This route does not set firmware version. |
 | `GET /api/sessions?offset=N&limit=N` | Paged `application/msgpack` array of session objects. Defaults are offset 0 and limit 50. Current handler does not clamp/validate pagination bounds. |
 | `GET /api/cmd?action=...` | Mutating command endpoint for `syncTime`, `startSession`, `stopSession`, `recalibrate`, `deletePatient`, `deleteSession`, and `reboot`. It uses GET and has no authentication. Reboot responds first, then delays 500 ms in a short-lived task before restarting. |
-| WebSocket `/ws` | Client messages are JSON commands for time sync, session start/stop, recalibration, and deletes. Server messages include `angle`, `liveStats`, and `status`; the WebSocket status includes firmware version. |
+| WebSocket `/ws` | Client messages are JSON commands for time sync, session start/stop, recalibration, and deletes. Decimated `angle` messages include the roll compatibility alias plus numeric `roll` and `pitch`; other server messages include `liveStats` and `status`, and WebSocket status includes firmware version. |
 | ElegantOTA `/update` | Registered by `ElegantOTA.begin(&server)`. The UI also downloads release assets from GitHub and posts them to the device update endpoint. This changes device firmware/filesystem. |
 | `/` and static files | `serveStatic("/", LittleFS, "/")`, default `index.html`, with cache revalidation. Missing root gets fallback HTML; missing GET assets log and return 404. |
 
@@ -114,13 +114,13 @@ The web server is started before `sysCommandQueue` is created. If changing start
 
 ### Browser application
 
-- `index.html` loads local Chart.js and MessagePack bundles, then `app.js` as an ES module. `app.js` wires StateManager, NetworkService, UIManager, and GameEngine; it applies the inversion checkbox before passing incoming angle data to the engine.
+- `index.html` loads local Chart.js and MessagePack bundles, then `app.js` as an ES module. `app.js` wires StateManager, NetworkService, UIManager, and GameEngine; it applies the inversion checkbox to roll and pitch before passing telemetry to the engine.
 - WebSocket is attempted first. If it is not open after 8 seconds, or closes, the client uses `/api/status` polling every 250 ms and continues background reconnect attempts every 5 seconds (up to 10 attempts), then retries after a 75-second recovery timer. Session history is always fetched from the HTTP MessagePack endpoint in pages of 50.
 - The visualizer uses shortest-path angular interpolation for the circle. Games receive the target sensor angle directly from the animation loop. The engine's `requestAnimationFrame` loop continues after app initialization even when no game is active.
 - `UIManager` owns the dashboard DOM. The ALL view includes every loaded session; selecting a patient filters the same eight-column history table. The table intentionally scrolls horizontally inside its container on mobile and cells remain single-line. Keep document-level horizontal overflow out of responsive changes.
 - The dashboard validates a target norm in the inclusive 10..180 range and calculates recovery percentage. Historical chart amplitudes can exceed 180; the chart raises its Y maximum dynamically. Reject non-finite chart coordinates and preserve the empty/loading/error/no-results states.
 - CSV export is created in-browser from loaded sessions. Preserve Ukrainian column labels, text escaping, and existing session semantics.
-- Games are loaded from `/games/<id>/game.js` on first use and registered under `window.RehabGames`. Each game implements `init(canvas, options)`, `update(angle, dt)`, `draw(ctx)`, optional `resize(width, height)`, and `stop()`; `GameEngine` supplies CSS-pixel dimensions while scaling the canvas backing store for device pixel ratio.
+- Games are loaded from `/games/<id>/game.js` on first use and registered under `window.RehabGames`. New cartridges can use `window.RehabGames.register(id, GameClass, { directions: 2 | 4 })`; unannotated legacy cartridges default to 2-direction requirements, and 4-direction requirements automatically enable vertical input. `GameEngine` passes a normalized input reader as the optional third `update(angle, dt, input)` argument (`input.getAxis("Horizontal"|"Vertical")`), with taring on game start, a default 0.08 deadzone, and 30-degree sensitivity. The selector defaults to 2-direction mode; legacy cartridges using `update(angle, dt)` remain supported. Each game implements `init(canvas, options)`, `update(angle, dt)`, `draw(ctx)`, optional `resize(width, height)`, and `stop()`; `GameEngine` supplies CSS-pixel dimensions while scaling the canvas backing store for device pixel ratio.
 - UI strings and exported reports are Ukrainian. The release checker requires external Internet access to GitHub; local monitoring, API, and static assets are served by the device.
 
 ## Hardware, Flash, And Configuration

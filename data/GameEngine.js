@@ -1,14 +1,78 @@
+const TWO_DIRECTION = "two-direction";
+const FOUR_DIRECTION = "four-direction";
+
+const shortestAngleDelta = (angle, origin) => ((angle - origin + 540) % 360) - 180;
+
+export class GameInput {
+    constructor() {
+        this.mode = TWO_DIRECTION;
+        this.deadzone = 0.08;
+        this.sensitivityDeg = 30;
+        this.roll = 0;
+        this.pitch = 0;
+        this.rollTare = 0;
+        this.pitchTare = 0;
+    }
+
+    setAngles(roll, pitch) {
+        if (Number.isFinite(Number(roll))) this.roll = Number(roll);
+        if (Number.isFinite(Number(pitch))) this.pitch = Number(pitch);
+    }
+
+    configure({ deadzone = this.deadzone, sensitivityDeg = this.sensitivityDeg } = {}) {
+        this.deadzone = Math.max(0, Math.min(0.95, Number(deadzone) || 0));
+        this.sensitivityDeg = Math.max(1, Number(sensitivityDeg) || this.sensitivityDeg);
+    }
+
+    tare() {
+        this.rollTare = this.roll;
+        this.pitchTare = this.pitch;
+    }
+
+    normalize(angle, origin) {
+        const scaled = Math.max(-1, Math.min(1, shortestAngleDelta(angle, origin) / this.sensitivityDeg));
+        const magnitude = Math.abs(scaled);
+        if (magnitude <= this.deadzone) return 0;
+        return Math.sign(scaled) * (magnitude - this.deadzone) / (1 - this.deadzone);
+    }
+
+    get horizontal() {
+        return this.normalize(this.roll, this.rollTare);
+    }
+
+    get vertical() {
+        return this.mode === FOUR_DIRECTION ? this.normalize(this.pitch, this.pitchTare) : 0;
+    }
+
+    getAxis(axis) {
+        const name = String(axis || "").toLowerCase();
+        if (name === "horizontal" || name === "x") return this.horizontal;
+        if (name === "vertical" || name === "y") return this.vertical;
+        return 0;
+    }
+}
+
 export class GameEngine {
     constructor(stateManager) {
         this.stateManager = stateManager;
+        window.RehabGames = window.RehabGames || {};
+        if (typeof window.RehabGames.register !== "function") {
+            window.RehabGames.register = (gameId, GameClass, inputRequirements = GameClass.inputRequirements || { directions: 2 }) => {
+                GameClass.inputRequirements = inputRequirements;
+                window.RehabGames[gameId] = GameClass;
+            };
+        }
         
         this.currentAngle = 0;
         this.activeGame = null;
+        this.input = new GameInput();
+        this.userInputMode = this.stateManager.get('gameInputMode') || TWO_DIRECTION;
         this.animationId = null;
         this.lastTime = 0;
         this.lastAngleSampleTime = null;
         this.angleSampleInterval = 1 / 20;
         this.isRunning = false;
+        this.applyInputMode();
         
         this.api = {
             updateHUD: (key, value) => {
@@ -69,12 +133,35 @@ export class GameEngine {
     }
 
     setTargetAngle(angle) {
+        this.setTargetAngles(angle, this.input.pitch);
+    }
+
+    setTargetAngles(roll, pitch) {
         const now = performance.now();
         if (this.lastAngleSampleTime !== null) {
             this.angleSampleInterval = Math.min((now - this.lastAngleSampleTime) / 1000, 0.5);
         }
         this.lastAngleSampleTime = now;
-        this.stateManager.update('targetAngle', angle);
+        this.input.setAngles(roll, pitch);
+        this.stateManager.updateMultiple({ targetAngle: this.input.roll, targetPitch: this.input.pitch });
+    }
+
+    setInputMode(mode) {
+        this.userInputMode = mode === FOUR_DIRECTION ? FOUR_DIRECTION : TWO_DIRECTION;
+        this.applyInputMode();
+    }
+
+    applyInputMode() {
+        const requirements = this.activeGame?.inputRequirements || this.activeGame?.constructor?.inputRequirements || {};
+        const mode = requirements.directions >= 4 ? FOUR_DIRECTION : this.userInputMode;
+        this.input.mode = mode;
+        this.stateManager.update('gameInputMode', mode);
+        const selector = document.getElementById("gameInputMode");
+        if (selector) selector.value = mode;
+    }
+
+    tareInput() {
+        this.input.tare();
     }
 
     loadGame(gameId, callback) {
@@ -100,11 +187,20 @@ export class GameEngine {
             const { ctx } = this.resizeCanvas(canvas);
             
             const GameClass = window.RehabGames[gameId];
+            GameClass.inputRequirements = GameClass.inputRequirements || { directions: 2 };
             this.activeGame = new GameClass(ctx, this.api);
+            this.applyInputMode();
+            this.input.tare();
             
             const calibMin = this.stateManager.get('calibMin');
             const calibMax = this.stateManager.get('calibMax');
-            this.activeGame.init(canvas, { calibMin, calibMax, difficulty: 'auto' });
+            this.activeGame.init(canvas, {
+                calibMin,
+                calibMax,
+                difficulty: 'auto',
+                inputMode: this.input.mode,
+                inputRequirements: GameClass.inputRequirements
+            });
             
             document.getElementById("gamePlaceholder").style.display = "none";
             document.getElementById("gameHUD").style.display = "flex";
@@ -121,6 +217,7 @@ export class GameEngine {
             this.activeGame.stop();
         }
         this.activeGame = null;
+        this.applyInputMode();
         this.api.clearCustomHTML();
         
         const ph = document.getElementById("gamePlaceholder");
@@ -156,7 +253,7 @@ export class GameEngine {
         
         if (this.isRunning && this.activeGame) {
             // Games receive RAW targetAngle for instant reaction (no smoothing delay)
-            this.activeGame.update(targetAngle, dt);
+            this.activeGame.update(targetAngle, dt, this.input);
             this.activeGame.draw(document.getElementById("mainGameCanvas").getContext("2d"));
             
             const min = this.stateManager.get('calibMin');

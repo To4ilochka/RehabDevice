@@ -146,6 +146,8 @@ void WebServerModule::setupRoutes() {
         doc["sessionActive"] = active;
         doc["patientId"] = rec.patientId;
         doc["angle"] = serialized(String(mpu.roll, 2));
+        doc["roll"] = mpu.roll;
+        doc["pitch"] = mpu.pitch;
         doc["sdAvailable"] = dbManager.isSDAvailable();
         doc["sensorMutexMisses"] = sensor->getMutexMissCount();
         
@@ -292,11 +294,11 @@ void WebServerModule::handleWebSocketMessage(AsyncWebSocketClient* client, uint8
     }
 }
 
-void WebServerModule::broadcastAngle(float angle) {
+void WebServerModule::broadcastAngle(float roll, float pitch) {
     if (ws.count() == 0) return;
 
-    char buf[64];
-    snprintf(buf, sizeof(buf), "{\"type\":\"angle\",\"angle\":%.2f}", angle);
+    char buf[96];
+    snprintf(buf, sizeof(buf), "{\"type\":\"angle\",\"angle\":%.2f,\"roll\":%.2f,\"pitch\":%.2f}", roll, roll, pitch);
     
     for (auto& client : ws.getClients()) {
         if (client.status() == WS_CONNECTED && client.canSend()) {

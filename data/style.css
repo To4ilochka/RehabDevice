@@ -218,7 +218,7 @@ main {
 
 @media (max-width: 968px) {
     .grid-2 {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
@@ -231,6 +231,8 @@ main {
     box-shadow: var(--shadow-card);
     transition: border-color 0.3s ease;
 }
+
+.grid-2 > .card { min-width: 0; }
 
 .card:hover {
     border-color: rgba(0, 242, 254, 0.35);
@@ -780,6 +782,8 @@ tr:hover td {
 .active-patient-badge { padding: 1rem; background: rgba(0, 230, 118, 0.1); border: 1px solid rgba(0, 230, 118, 0.3); border-radius: 12px; }
 .active-patient-title { font-size: 1.25rem; color: var(--accent-green); margin-top: 0.25rem; }
 .select-dark { flex: 1; padding: 0.5rem; color: #ffffff; background-color: #1e293b; -webkit-appearance: none; appearance: none; }
+#authActivePanel .game-input-controls { min-width: 0; }
+#gameInputMode { min-width: 0; }
 .btn-gradient-primary { background: linear-gradient(135deg, #ff007a, #7928ca); color: white; border: none; font-weight: 600; box-shadow: 0 4px 15px rgba(255, 0, 122, 0.4); padding: 0.5rem 1rem; }
 .btn-success { background: #00e676; color: #000; font-weight: bold; }
 .divider { border: 0; border-top: 1px solid var(--border-color); margin: 0.5rem 0; }

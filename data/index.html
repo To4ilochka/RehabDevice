@@ -83,6 +83,13 @@
                                 ▶️ Старт
                             </button>
                         </div>
+                        <div class="flex-row gap-s mt-s game-input-controls">
+                            <select id="gameInputMode" class="input-field select-dark" aria-label="Режим керування грою">
+                                <option value="two-direction" selected>↔ 2 напрямки: горизонтальний нахил</option>
+                                <option value="four-direction">↕ 4 напрямки: горизонтальний і вертикальний нахил</option>
+                            </select>
+                            <button class="btn btn-secondary" id="btnTareGameInput" type="button" title="Встановити поточне положення як нульове">🎯 0°</button>
+                        </div>
                         
 
                         <button class="btn btn-danger" id="btnStopSession">⏹️ Завершити сесію та зберегти</button>

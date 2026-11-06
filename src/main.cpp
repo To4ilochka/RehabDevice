@@ -165,10 +165,9 @@ void loop() {
         analytics.processData(data);
         
         packetCounter++;
-        // Hardware clock sync: MPU6050 produces 100 packets/sec. 
-        // Broadcast every 5th packet (20Hz) — sufficient for smooth UI with client-side interpolation
+        // Keep the existing decimated WebSocket cadence while carrying both tilt axes.
         if (packetCounter % 5 == 0) {
-            webServer.broadcastAngle(data.roll);
+            webServer.broadcastAngle(data.roll, data.pitch);
             webServer.broadcastLiveStats();
         }
     }

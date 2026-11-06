@@ -348,7 +348,10 @@ class DoctorDashboardTests(unittest.TestCase):
                 }"""))
                 delete_button = self.page.locator("#sessionsTableBody .btn-delete-session")
                 self.assertEqual(delete_button.count(), 2)
-                delete_button.first.scroll_into_view_if_needed()
+                self.page.evaluate("""() => {
+                    const container = document.querySelector('#tabDoctor .table-container');
+                    container.scrollLeft = container.scrollWidth;
+                }""")
                 # Engines report a stale empty rect right after a resize, so wait for laid-out geometry.
                 delete_box = self.page.wait_for_function("""() => {
                     const rect = document.querySelector('#sessionsTableBody .btn-delete-session')
@@ -361,6 +364,84 @@ class DoctorDashboardTests(unittest.TestCase):
         self.page.once("dialog", lambda dialog: dialog.accept())
         self.page.locator("#sessionsTableBody .btn-delete-session").first.click()
         self.assertEqual(self.page.evaluate("commands.pop()"), ["deleteSession", {"id": 2}])
+
+    def test_game_input_pipeline_modes_and_tare(self):
+        self.page.locator('[data-tab="tabPatient"]').click()
+        self.page.wait_for_function("document.querySelector('#tabPatient.active')")
+        result = self.page.evaluate("""async () => {
+            const {GameEngine, GameInput} = await import('/GameEngine.js');
+            const input = new GameInput();
+            input.setAngles(5, 10);
+            input.tare();
+            input.setAngles(20, 25);
+            const horizontal = input.getAxis('Horizontal');
+            const verticalInTwoDirectionMode = input.getAxis('Vertical');
+            input.mode = 'four-direction';
+            const verticalInFourDirectionMode = input.getAxis('Vertical');
+            input.configure({deadzone: 0.08, sensitivityDeg: 60});
+            input.tare();
+            input.setAngles(22, 27);
+            const insideDeadzone = input.getAxis('Horizontal');
+
+            const engine = new GameEngine(state);
+            window.engineInstance = engine;
+            const selector = document.getElementById('gameInputMode');
+            const initialMode = selector.value;
+            document.getElementById('authActivePanel').style.display = 'flex';
+            const modeBounds = selector.getBoundingClientRect();
+            const tareBounds = document.getElementById('btnTareGameInput').getBoundingClientRect();
+            const controlsFit = modeBounds.width > 0 && modeBounds.right <= tareBounds.left
+                && tareBounds.right <= innerWidth;
+            selector.value = 'four-direction';
+            selector.dispatchEvent(new Event('change', {bubbles: true}));
+            const selectedFourDirectionMode = engine.input.mode;
+            selector.value = 'two-direction';
+            selector.dispatchEvent(new Event('change', {bubbles: true}));
+            window.RehabGames.register('four-axis-probe', class {}, {directions: 4});
+            engine.activeGame = new window.RehabGames['four-axis-probe']();
+            engine.applyInputMode();
+            const requiredMode = selector.value;
+            engine.setTargetAngles(12, 18);
+            engine.tareInput();
+            const taredRoll = engine.input.rollTare;
+            const taredPitch = engine.input.pitchTare;
+            engine.activeGame = null;
+            engine.applyInputMode();
+            return {horizontal, verticalInTwoDirectionMode, verticalInFourDirectionMode,
+                insideDeadzone, initialMode, selectedFourDirectionMode, requiredMode, taredRoll, taredPitch,
+                restoredMode: selector.value, controlsFit,
+                controlBounds: {viewport: innerWidth, mode: modeBounds.toJSON(), tare: tareBounds.toJSON()}};
+        }""")
+        self.assertAlmostEqual(result["horizontal"], (0.5 - 0.08) / 0.92)
+        self.assertEqual(result["verticalInTwoDirectionMode"], 0)
+        self.assertAlmostEqual(result["verticalInFourDirectionMode"], (0.5 - 0.08) / 0.92)
+        self.assertEqual(result["insideDeadzone"], 0)
+        self.assertEqual(result["initialMode"], "two-direction")
+        self.assertTrue(result["controlsFit"], result["controlBounds"])
+        self.assertEqual(result["selectedFourDirectionMode"], "four-direction")
+        self.assertEqual(result["requiredMode"], "four-direction")
+        self.assertEqual((result["taredRoll"], result["taredPitch"]), (12, 18))
+        self.assertEqual(result["restoredMode"], "two-direction")
+
+    def test_dual_axis_polling_and_websocket_messages(self):
+        result = self.page.evaluate("""async () => {
+            const {NetworkService} = await import('/NetworkService.js');
+            const service = new NetworkService();
+            const originalFetch = window.fetch;
+            window.fetch = async () => ({json: async () => ({angle: '12.00', roll: 12, pitch: -7})});
+            const polledAngle = new Promise(resolve => service.onMessage(message => {
+                if (message.type === 'angle') resolve(message);
+            }));
+            service.pollOnce();
+            const polling = await polledAngle;
+            window.fetch = originalFetch;
+            let websocket;
+            service.onMessage(message => { websocket = message; });
+            service.handleServerMessage({type: 'angle', angle: 4, roll: 4, pitch: 9});
+            return {polling, websocket};
+        }""")
+        self.assertEqual(result["polling"], {"type": "angle", "angle": 12, "roll": 12, "pitch": -7})
+        self.assertEqual(result["websocket"], {"type": "angle", "angle": 4, "roll": 4, "pitch": 9})
 
     @staticmethod
     def artifacts():
