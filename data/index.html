@@ -31,14 +31,14 @@
 
     <main>
         <!-- Tab navigation -->
-        <nav class="tabs-nav">
-            <button class="tab-btn active" data-tab="tabPatient">
+        <nav class="tabs-nav" aria-label="Основні розділи">
+            <button class="tab-btn active" data-tab="tabPatient" type="button">
                 <span>🧘 Тренування та Моніторинг</span>
             </button>
-            <button class="tab-btn" data-tab="tabDoctor">
+            <button class="tab-btn" data-tab="tabDoctor" type="button">
                 <span>🩺 Інтерфейс Лікаря (Статистика)</span>
             </button>
-            <button class="tab-btn" data-tab="tabSettings">
+            <button class="tab-btn" data-tab="tabSettings" type="button">
                 <span>⚙️ Налаштування та Оновлення</span>
             </button>
         </nav>
@@ -58,9 +58,9 @@
                             <label for="patientIdInput">ПІБ / ID Пацієнта</label>
                             <input type="text" id="patientIdInput" class="input-field" placeholder="Наприклад: Іван Петренко" autocomplete="off">
                         </div>
-                        <button class="btn" id="btnStartSession">🚀 Розпочати сесію</button>
+                        <button class="btn" id="btnStartSession" type="button">🚀 Розпочати сесію</button>
                         <p class="info-note">
-                            ℹ️ Візуалізація кута повороту (коло) працює завжди, навіть у гостьовому режимі без авторизації. При авторизації вмикається збір розширеної аналітики та збереження в пам'ять.
+                            ℹ️ Візуалізація кута працює завжди, навіть у гостьовому режимі без авторизації. При авторизації вмикаються реабілітаційні ігри, розширена аналітика та збереження в пам'ять.
                         </p>
                     </div>
 
@@ -70,49 +70,64 @@
                             <span class="text-sm text-secondary">Активна сесія пацієнта:</span>
                             <h3 id="activePatientName" class="active-patient-title">Пацієнт</h3>
                         </div>
-                        
-                        <!-- Game Launch Dropdown (Visible only when session is active) -->
-                        <div class="flex-row gap-s mt-s">
-                            <select id="gameSelect" class="input-field select-dark">
-                                <option value="pingpong" style="color: #ffffff;">🎮 Пінг-понг (Smart Bot)</option>
-                                <option value="balanceboard" style="color: #ffffff;">⚖️ Баланс-Борд (Рівновага)</option>
-                                <option value="cardodge" style="color: #ffffff;">🏎️ Car Dodge (Ухиляння)</option>
-                                <option value="balance3d" style="color: #ffffff;">🤖 3D Баланс Робота</option>
-                                <option value="safecracker" style="color: #ffffff;">🔓 Зламай Код (Точність)</option>
-                                <option value="vrdragon" style="color: #ffffff;">🐉 VR Дракон (3D Політ)</option>
-                            </select>
-                            <button class="btn btn-gradient-primary" id="btnModeGame">
-                                ▶️ Старт
-                            </button>
-                        </div>
-                        <div class="flex-row gap-s mt-s game-input-controls">
-                            <select id="gameInputMode" class="input-field select-dark" aria-label="Режим керування грою">
-                                <option value="two-direction" selected>↔ 2 напрямки: горизонтальний нахил</option>
-                                <option value="four-direction">↕ 4 напрямки: горизонтальний і вертикальний нахил</option>
-                            </select>
-                            <button class="btn btn-secondary" id="btnTareGameInput" type="button" title="Встановити поточне положення як нульове">🎯 0°</button>
-                        </div>
-                        
 
-                        <button class="btn btn-danger" id="btnStopSession">⏹️ Завершити сесію та зберегти</button>
+                        <!-- Step 1: Choose 2-direction vs 4-direction sensor mode -->
+                        <div class="input-group game-input-controls">
+                            <label for="gameInputMode">1. Режим рухів датчика</label>
+                            <select id="gameInputMode" class="input-field select-dark">
+                                <option value="two-direction" selected>↔ 2 напрямки (вліво / вправо)</option>
+                                <option value="four-direction">↕ 4 напрямки (баланс-дошка 360°)</option>
+                            </select>
+                        </div>
+
+                        <!-- Step 2: Filtered Game Launch Dropdown -->
+                        <div class="input-group">
+                            <label for="gameSelect" id="gameSelectLabel">2. Оберіть гру (2 напрямки)</label>
+                            <div class="flex-row gap-s game-launch-row">
+                                <select id="gameSelect" class="input-field select-dark">
+                                    <option value="pingpong" data-directions="2" style="color: #ffffff;">🎮 Пінг-понг (Smart Bot)</option>
+                                    <option value="balanceboard" data-directions="2" style="color: #ffffff;">⚖️ Баланс-Борд (Рівновага)</option>
+                                    <option value="cardodge" data-directions="2" style="color: #ffffff;">🏎️ Car Dodge (Ухиляння)</option>
+                                    <option value="safecracker" data-directions="2" style="color: #ffffff;">🔓 Зламай Код (Точність)</option>
+                                    <option value="balance3d" data-directions="4" style="color: #ffffff;">🤖 3D Баланс Робота</option>
+                                    <option value="vrdragon" data-directions="4" style="color: #ffffff;">🐉 Політ Дракона (3D)</option>
+                                </select>
+                                <button class="btn btn-gradient-primary" id="btnModeGame" type="button">
+                                    ▶️ Старт
+                                </button>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-danger" id="btnStopSession" type="button">⏹️ Завершити сесію та зберегти</button>
                     </div>
 
                     <hr class="divider">
 
-                    <!-- Sensor zero-position calibration -->
+                    <!-- Unified sensor & game zero-position calibration -->
                     <div class="input-group">
-                        <label>Миттєве калібрування нульової позиції</label>
-                        <button class="btn btn-secondary" id="btnRecalibrate">🎯 Рекалібрування 0° на льоту</button>
+                        <span id="recalibrateHint" class="group-caption">Калібрування нульової позиції (датчик та ігри)</span>
+                        <button class="btn btn-secondary" id="btnRecalibrate" type="button" aria-describedby="recalibrateHint">🎯 Встановити 0° (Калібрувати нуль)</button>
                     </div>
                     
-                    <!-- Angle Inversion Toggle -->
+                    <!-- Axis Inversion & 4-Direction Balance Board Mounting Helpers -->
                     <div class="input-group setting-row">
-                        <label for="invertAngleToggle" class="mb-0 cursor-pointer">🔄 Інверсія осі (Реверс рухів)</label>
+                        <label for="invertAngleToggle" id="invertAngleLabel" class="mb-0 cursor-pointer">🔄 Інверсія осі (вліво / вправо)</label>
                         <input type="checkbox" id="invertAngleToggle" class="toggle-checkbox">
+                    </div>
+
+                    <div id="fourWayOrientationControls" class="flex-col gap-s" hidden>
+                        <div class="input-group setting-row">
+                            <label for="invertPitchToggle" class="mb-0 cursor-pointer">↕️ Інверсія нахилу (вперед / назад)</label>
+                            <input type="checkbox" id="invertPitchToggle" class="toggle-checkbox">
+                        </div>
+                        <div class="input-group setting-row">
+                            <label for="swapAxesToggle" class="mb-0 cursor-pointer">🧭 Датчик повернуто на 90° (X ↔ Y)</label>
+                            <input type="checkbox" id="swapAxesToggle" class="toggle-checkbox">
+                        </div>
                     </div>
                 </div>
 
-                <!-- Right column: Interactive angle visualizer or Game -->
+                <!-- Right column: Interactive angle visualizer (1D Wrist or 2D Balance Board) -->
                 <div class="card flex-col">
                     <div class="card-header mb-0">
                         <div class="card-title" id="visualizerTitle">🔄 Динамічна візуалізація кута кисті</div>
@@ -120,12 +135,13 @@
                     <div class="visualizer-container flex-1" id="visualizerContainer">
                         <div class="circle-wrapper">
                             <div class="circle-background"></div>
+                            <!-- 1D Wrist Angle Indicator (shown in 2-direction mode) -->
                             <div class="circle-indicator" id="circleIndicator">
                                 <div class="circle-crosshair"></div>
                                 <div class="circle-crosshair vert"></div>
                                 <!-- Orange arrow indicating wrist flexion angle -->
                                 <div class="circle-arrow">
-                                    <svg viewBox="0 0 44 110" class="arrow-svg">
+                                    <svg aria-hidden="true" viewBox="0 0 44 110" class="arrow-svg">
                                         <defs>
                                             <linearGradient id="arrowGrad" x1="0%" y1="100%" x2="0%" y2="0%">
                                                 <stop offset="0%" stop-color="rgba(255, 145, 0, 0.05)" />
@@ -145,10 +161,35 @@
                                     </svg>
                                 </div>
                             </div>
+
+                            <!-- 2D Balance Board Bubble Level (shown in 4-direction mode) -->
+                            <div class="balance-visualizer" id="balanceBoardVisualizer" hidden>
+                                <div class="circle-crosshair"></div>
+                                <div class="circle-crosshair vert"></div>
+                                <div class="balance-ring-inner"></div>
+                                <span class="balance-axis-tag top">Вперед</span>
+                                <span class="balance-axis-tag bottom">Назад</span>
+                                <span class="balance-axis-tag left">Вліво</span>
+                                <span class="balance-axis-tag right">Вправо</span>
+                                <div class="balance-puck" id="balancePuck"></div>
+                            </div>
                         </div>
+
                         <div class="angle-display">
-                            <div class="angle-value"><span id="angleValueElem">0.0</span>°</div>
-                            <div class="angle-unit">Поточний кут повороту</div>
+                            <div id="singleAngleReadout">
+                                <div class="angle-value"><span id="angleValueElem">0.0</span>°</div>
+                                <div class="angle-unit">Поточний кут повороту</div>
+                            </div>
+                            <div class="dual-angle-readout" id="dualAngleReadout" hidden>
+                                <div class="dual-angle-pill">
+                                    <span class="dual-angle-label">↔ Вліво / Вправо</span>
+                                    <strong class="dual-angle-num"><span id="rollValueElem">0.0</span>°</strong>
+                                </div>
+                                <div class="dual-angle-pill">
+                                    <span class="dual-angle-label">↕ Вперед / Назад</span>
+                                    <strong class="dual-angle-num"><span id="pitchValueElem">0.0</span>°</strong>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -363,10 +404,13 @@
     
     <!-- Full-Screen Game Overlay Container -->
     <div id="gameContainer" class="game-overlay" style="display: none;">
-        <!-- Top Bar with Exit Button -->
+        <!-- Top Bar with In-Game Zero Tare & Exit Button -->
         <div class="game-overlay-header">
-            <div style="color: white; font-weight: 600; font-size: 1.2rem;">🎮 Реабілітаційні ігри</div>
-            <button id="btnExitGame" class="btn btn-danger" style="padding: 0.5rem 1rem; font-size: 0.9rem;">❌ Вийти / Назад</button>
+            <div class="game-overlay-title">🎮 Реабілітаційні ігри</div>
+            <div class="game-overlay-actions">
+                <button id="btnTareGameInput" type="button" class="btn btn-secondary btn-game-action">🎯 0° Центрувати</button>
+                <button id="btnExitGame" type="button" class="btn btn-danger btn-game-action">❌ Вийти / Назад</button>
+            </div>
         </div>
         <!-- Game Engine Container -->
         <div id="gameEngineWrapper" class="game-engine-wrapper">
@@ -410,6 +454,6 @@
     </script>
     <script src="msgpack.min.js"></script>
     <script src="chart.js"></script>
-    <script type="module" src="app.js?v=7"></script>
+    <script type="module" src="app.js?v=8"></script>
 </body>
 </html>

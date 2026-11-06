@@ -2,6 +2,7 @@
 #include "AngleMath.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <math.h>
 
 extern TaskHandle_t sensorTaskHandle;
 
@@ -18,12 +19,73 @@ void IRAM_ATTR SensorMPU::dmpDataReadyISR() {
 SensorMPU::SensorMPU() : dmpReady(false), mpuIntStatus(0), devStatus(0), packetSize(0), fifoCount(0),
                          pitchOffset(0.0f), rollOffset(0.0f), yawOffset(0.0f),
                          dataMutex(nullptr), mutexMissCount(0),
-                         calState(CAL_IDLE), calWaitStartTime(0), recalibratePending(false) {
+                         calState(CAL_IDLE), calWaitStartTime(0),
+                         recalibratePending(false), recalibratedPendingSample(false) {
     memset(&currentData, 0, sizeof(currentData));
+    setIdentityGravityRef();
     dataMutex = xSemaphoreCreateMutex();
     if (dataMutex == nullptr) {
         Serial.println("[SensorMPU] FATAL: Failed to create data mutex!");
     }
+}
+
+void SensorMPU::setIdentityGravityRef() {
+    memset(gravRefMatrix, 0, sizeof(gravRefMatrix));
+    gravRefMatrix[0] = 1.0f;
+    gravRefMatrix[4] = 1.0f;
+    gravRefMatrix[8] = 1.0f;
+}
+
+void SensorMPU::updateGravityRefFromVector(float gx, float gy, float gz) {
+    const float norm = sqrtf(gx * gx + gy * gy + gz * gz);
+    if (!isfinite(norm) || norm < 1e-4f) {
+        setIdentityGravityRef();
+        return;
+    }
+
+    const float x0 = gx / norm;
+    const float y0 = gy / norm;
+    const float z0 = gz / norm;
+
+    // Shortest-arc Rodrigues rotation mapping unit gravity (x0, y0, z0) -> (0, 0, +1)
+    // without introducing 6-axis gyro yaw drift into tilt axes.
+    if (z0 > -0.9999f) {
+        const float k = 1.0f / (1.0f + z0);
+        gravRefMatrix[0] = 1.0f - k * x0 * x0;
+        gravRefMatrix[1] = -k * x0 * y0;
+        gravRefMatrix[2] = -x0;
+        gravRefMatrix[3] = -k * x0 * y0;
+        gravRefMatrix[4] = 1.0f - k * y0 * y0;
+        gravRefMatrix[5] = -y0;
+        gravRefMatrix[6] = x0;
+        gravRefMatrix[7] = y0;
+        gravRefMatrix[8] = z0;
+    } else {
+        // Sensor mounted upside-down (z0 ~= -1): 180-degree rotation around X-axis
+        gravRefMatrix[0] = 1.0f;  gravRefMatrix[1] = 0.0f;  gravRefMatrix[2] = 0.0f;
+        gravRefMatrix[3] = 0.0f;  gravRefMatrix[4] = -1.0f; gravRefMatrix[5] = 0.0f;
+        gravRefMatrix[6] = 0.0f;  gravRefMatrix[7] = 0.0f;  gravRefMatrix[8] = -1.0f;
+    }
+}
+
+void SensorMPU::computeCalibratedTilt(const VectorFloat& rawGrav, float& outPitchDeg, float& outRollDeg) const {
+    const float norm = sqrtf(rawGrav.x * rawGrav.x + rawGrav.y * rawGrav.y + rawGrav.z * rawGrav.z);
+    if (!isfinite(norm) || norm < 1e-4f) {
+        outPitchDeg = 0.0f;
+        outRollDeg = 0.0f;
+        return;
+    }
+
+    const float gx = rawGrav.x / norm;
+    const float gy = rawGrav.y / norm;
+    const float gz = rawGrav.z / norm;
+
+    const float cx = gravRefMatrix[0] * gx + gravRefMatrix[1] * gy + gravRefMatrix[2] * gz;
+    const float cy = gravRefMatrix[3] * gx + gravRefMatrix[4] * gy + gravRefMatrix[5] * gz;
+    const float cz = gravRefMatrix[6] * gx + gravRefMatrix[7] * gy + gravRefMatrix[8] * gz;
+
+    outRollDeg = normalizeAngleDifference(atan2f(cy, cz) * (180.0f / static_cast<float>(M_PI)));
+    outPitchDeg = normalizeAngleDifference(atan2f(cx, hypotf(cy, cz)) * (180.0f / static_cast<float>(M_PI)));
 }
 
 bool SensorMPU::init() {
@@ -124,25 +186,45 @@ void SensorMPU::update() {
         
         Quaternion tempQ;
         VectorFloat tempGravity;
-        float tempYPR[3];
         mpu.dmpGetQuaternion(&tempQ, buffer);
-        mpu.dmpGetGravity(&tempGravity, &tempQ);
-        mpu.dmpGetYawPitchRoll(tempYPR, &tempQ, &tempGravity);
 
-        if (!isfinite(tempYPR[0]) || !isfinite(tempYPR[1]) || !isfinite(tempYPR[2])) {
+        const float calNormSq = tempQ.w * tempQ.w + tempQ.x * tempQ.x + tempQ.y * tempQ.y + tempQ.z * tempQ.z;
+        if (calNormSq < 0.5f || calNormSq > 1.5f || isnan(tempQ.w) || isnan(tempQ.x) || isnan(tempQ.y) || isnan(tempQ.z)) {
             mpu.resetFIFO();
             calState = CAL_IDLE;
             return;
         }
 
-        yawOffset = tempYPR[0] * 180.0f / M_PI;
-        pitchOffset = tempYPR[1] * 180.0f / M_PI;
-        rollOffset = tempYPR[2] * 180.0f / M_PI;
+        mpu.dmpGetGravity(&tempGravity, &tempQ);
+        const float rawYaw = atan2f(
+            2.0f * tempQ.x * tempQ.y - 2.0f * tempQ.w * tempQ.z,
+            2.0f * tempQ.w * tempQ.w + 2.0f * tempQ.x * tempQ.x - 1.0f
+        ) * (180.0f / static_cast<float>(M_PI));
+
+        if (!isfinite(rawYaw) || !isfinite(tempGravity.x) || !isfinite(tempGravity.y) || !isfinite(tempGravity.z)) {
+            mpu.resetFIFO();
+            calState = CAL_IDLE;
+            return;
+        }
+
+        yawOffset = rawYaw;
+        pitchOffset = atan2f(tempGravity.x, hypotf(tempGravity.y, tempGravity.z)) * (180.0f / static_cast<float>(M_PI));
+        rollOffset = atan2f(tempGravity.y, tempGravity.z) * (180.0f / static_cast<float>(M_PI));
+        updateGravityRefFromVector(tempGravity.x, tempGravity.y, tempGravity.z);
+        recalibratedPendingSample = true;
+
+        if (dataMutex != nullptr && xSemaphoreTake(dataMutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+            currentData.yaw = 0.0f;
+            currentData.pitch = 0.0f;
+            currentData.roll = 0.0f;
+            xSemaphoreGive(dataMutex);
+        }
 
         mpu.resetFIFO();
         fifoCount = 0;
         calState = CAL_IDLE;
-        Serial.printf("[SensorMPU] Recalibration complete! New offsets: Y=%.2f, P=%.2f, R=%.2f\n", yawOffset, pitchOffset, rollOffset);
+        Serial.printf("[SensorMPU] Recalibration complete! Ref gravity=(%.3f, %.3f, %.3f), Y=%.2f, P=%.2f, R=%.2f\n",
+                      tempGravity.x, tempGravity.y, tempGravity.z, yawOffset, pitchOffset, rollOffset);
         return;
     }
 
@@ -168,16 +250,19 @@ void SensorMPU::update() {
             }
 
             mpu.dmpGetGravity(&gravity, &q);
-            mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
             int16_t gx, gy, gz, ax, ay, az;
             mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
-            float rawYaw = ypr[0] * 180.0f / M_PI;
-            float rawPitch = ypr[1] * 180.0f / M_PI;
-            float rawRoll = ypr[2] * 180.0f / M_PI;
+            const float rawYaw = atan2f(
+                2.0f * q.x * q.y - 2.0f * q.w * q.z,
+                2.0f * q.w * q.w + 2.0f * q.x * q.x - 1.0f
+            ) * (180.0f / static_cast<float>(M_PI));
+            float calibratedPitch = 0.0f;
+            float calibratedRoll = 0.0f;
+            computeCalibratedTilt(gravity, calibratedPitch, calibratedRoll);
 
-            if (!isfinite(rawRoll) || !isfinite(rawPitch) || !isfinite(rawYaw)) {
+            if (!isfinite(calibratedRoll) || !isfinite(calibratedPitch) || !isfinite(rawYaw)) {
                 mpu.resetFIFO();
                 fifoCount = 0;
                 return;
@@ -185,8 +270,8 @@ void SensorMPU::update() {
 
             if (dataMutex != nullptr && xSemaphoreTake(dataMutex, pdMS_TO_TICKS(2)) == pdTRUE) {
                 currentData.yaw = normalizeAngleDifference(rawYaw - yawOffset);
-                currentData.pitch = normalizeAngleDifference(rawPitch - pitchOffset);
-                currentData.roll = normalizeAngleDifference(rawRoll - rollOffset);
+                currentData.pitch = calibratedPitch;
+                currentData.roll = calibratedRoll;
 
                 // Convert gyro to deg/sec (131 LSB/deg/s) and accel to g (16384 LSB/g)
                 currentData.gyroX = gx / 131.0f;
@@ -197,6 +282,10 @@ void SensorMPU::update() {
                 currentData.accelY = ay / 16384.0f;
                 currentData.accelZ = az / 16384.0f;
 
+                if (recalibratedPendingSample) {
+                    currentData.recalibrated = true;
+                    recalibratedPendingSample = false;
+                }
                 currentData.dataUpdated = true;
                 currentData.timestamp = millis();
                 xSemaphoreGive(dataMutex);
@@ -222,6 +311,7 @@ MPUData SensorMPU::getData() {
     if (dataMutex != nullptr && xSemaphoreTake(dataMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
         result = currentData;
         currentData.dataUpdated = false;
+        currentData.recalibrated = false;
         xSemaphoreGive(dataMutex);
     } else if (dataMutex != nullptr) {
         __atomic_add_fetch(&mutexMissCount, 1, __ATOMIC_RELAXED);

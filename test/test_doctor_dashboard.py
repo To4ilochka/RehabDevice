@@ -316,6 +316,31 @@ class DoctorDashboardTests(unittest.TestCase):
             self.assertTrue(game_check, f"{game_id} failed non-finite input or viewport check")
             self.page.evaluate("engine.stopGame()")
 
+        # Balance3D orthogonal 4-way board physics & downhill perspective check
+        self.page.evaluate("""() => {
+            document.getElementById('gameContainer').style.display = 'flex';
+            engine.setTargetAngles(0, 0);
+            engine.startGame('balance3d');
+        }""")
+        self.page.wait_for_function(
+            "engine.activeGame && engine.activeGame.constructor.name === 'Balance3DGame'"
+        )
+        balance3d_check = self.page.evaluate("""() => {
+            const game = engine.activeGame;
+            const levelFarY = game._project(0, -40).y;
+            const centeredX = Math.abs(game._project(0, -40).x - game._project(0, 40).x) < 1e-6;
+            engine.setTargetAngles(0, 15);
+            game.update(0, 0.05, engine.input);
+            const purePitchNoXDrift = Math.abs(game.robotX) < 1e-6 && game.robotY < 0;
+            const farEdgeDropsDownhill = game._project(0, -40).y > levelFarY;
+            engine.stopGame();
+            return {centeredX, purePitchNoXDrift, farEdgeDropsDownhill};
+        }""")
+        self.assertTrue(balance3d_check["centeredX"])
+        self.assertTrue(balance3d_check["purePitchNoXDrift"])
+        self.assertTrue(balance3d_check["farEdgeDropsDownhill"])
+
+        # Non-VR single-screen 3D Dragon flight check
         self.page.evaluate("""() => {
             document.getElementById('gameContainer').style.display = 'flex';
             engine.setTargetAngles(0, 0);
@@ -328,6 +353,7 @@ class DoctorDashboardTests(unittest.TestCase):
             const game = engine.activeGame;
             const canvas = document.getElementById('mainGameCanvas');
             const ctx = canvas.getContext('2d');
+            const noVrHeadTrackingWhileActive = game._orientHandler === null && game._touchHandler === null;
             engine.setTargetAngles(18, -15);
             game.update(18, 0.1, engine.input);
             game.update(NaN, NaN, engine.input);
@@ -335,6 +361,8 @@ class DoctorDashboardTests(unittest.TestCase):
             game.draw(ctx);
             const leftPixel = ctx.getImageData(
                 Math.floor(canvas.width * 0.25), Math.floor(canvas.height * 0.5), 1, 1).data;
+            const centerSkyPixel = ctx.getImageData(
+                Math.floor(canvas.width * 0.5), Math.floor(canvas.height * 0.22), 1, 1).data;
             const rightPixel = ctx.getImageData(
                 Math.floor(canvas.width * 0.75), Math.floor(canvas.height * 0.5), 1, 1).data;
             const hudScore = document.getElementById('hudScore').textContent;
@@ -345,12 +373,20 @@ class DoctorDashboardTests(unittest.TestCase):
             const movedY = game.dragonY < 0 && Number.isFinite(game.dragonY);
             const signatures = [game.init.length, game.update.length, game.draw.length];
             const scrollFits = document.documentElement.scrollWidth <= innerWidth;
+            const overlayTareRect = document.getElementById('btnTareGameInput').getBoundingClientRect();
+            const overlayExitRect = document.getElementById('btnExitGame').getBoundingClientRect();
+            const overlayButtonsFit = overlayTareRect.width > 0
+                && overlayTareRect.right <= innerWidth
+                && overlayExitRect.right <= innerWidth;
             engine.stopGame();
             const cleanedUp = !game.active && game._orientHandler === null
                 && game.particles.length === 0 && game.mountains.length === 0;
             return {
                 signatures, modeValue, hasOption, movedX, movedY,
-                stereoRendered: leftPixel[3] > 0 && rightPixel[3] > 0,
+                noVrHeadTrackingWhileActive,
+                singleViewportRendered: leftPixel[3] > 0 && rightPixel[3] > 0
+                    && (centerSkyPixel[0] + centerSkyPixel[1] + centerSkyPixel[2]) > 30,
+                overlayButtonsFit,
                 hudScore, hudState, scrollFits, cleanedUp
             };
         }""")
@@ -359,7 +395,9 @@ class DoctorDashboardTests(unittest.TestCase):
         self.assertTrue(vrdragon_result["hasOption"])
         self.assertTrue(vrdragon_result["movedX"])
         self.assertTrue(vrdragon_result["movedY"])
-        self.assertTrue(vrdragon_result["stereoRendered"])
+        self.assertTrue(vrdragon_result["noVrHeadTrackingWhileActive"])
+        self.assertTrue(vrdragon_result["singleViewportRendered"])
+        self.assertTrue(vrdragon_result["overlayButtonsFit"])
         self.assertIn("Очки:", vrdragon_result["hudScore"])
         self.assertIn("Кристали:", vrdragon_result["hudScore"])
         self.assertIn("Дистанція:", vrdragon_result["hudState"])
@@ -414,21 +452,33 @@ class DoctorDashboardTests(unittest.TestCase):
             dragon.update(15, 0, engine.input);
             const activeVerticalIn4D = dragon.dragonTargetY > 0 && dragon.dragonTargetX > 0;
 
-            // Axis inversion preserves tare zero and flips direction
-            engine.setTargetAngles(12, -8);
+            // Axis inversion & 90-degree swap preserve tare zero and map axes cleanly
+            engine.setRawAngles(12, -8);
             engine.tareInput();
             engine.setAxisInversion(true);
             const zeroAfterInvert = engine.input.getAxis('Horizontal') === 0 && engine.input.getAxis('Vertical') === 0;
             engine.setAxisInversion(false);
+            engine.setAxisOrientation({invertX: false, invertY: true, swapAxes: true});
+            const zeroAfterSwapAndPitchInvert = engine.input.getAxis('Horizontal') === 0
+                && engine.input.getAxis('Vertical') === 0;
+            engine.setRawAngles(12, 7); // +15 deg raw pitch delta -> mapped to +15 deg horizontal when swapped
+            const swappedHorizontal = engine.input.getAxis('Horizontal') === 1
+                && engine.input.getAxis('Vertical') === 0;
+            engine.setAxisOrientation({invertX: false, invertY: false, swapAxes: false});
             engine.stopGame();
 
-            return {metadataOk, pitchImmune, lockedVerticalIn2D, activeVerticalIn4D, zeroAfterInvert};
+            return {
+                metadataOk, pitchImmune, lockedVerticalIn2D, activeVerticalIn4D,
+                zeroAfterInvert, zeroAfterSwapAndPitchInvert, swappedHorizontal
+            };
         }""")
         self.assertTrue(axis_audit["metadataOk"])
         self.assertTrue(axis_audit["pitchImmune"])
         self.assertTrue(axis_audit["lockedVerticalIn2D"])
         self.assertTrue(axis_audit["activeVerticalIn4D"])
         self.assertTrue(axis_audit["zeroAfterInvert"])
+        self.assertTrue(axis_audit["zeroAfterSwapAndPitchInvert"])
+        self.assertTrue(axis_audit["swappedHorizontal"])
 
 
     def assert_no_letter_stacking(self):
@@ -487,6 +537,7 @@ class DoctorDashboardTests(unittest.TestCase):
         self.assertEqual(self.page.evaluate("commands.pop()"), ["deleteSession", {"id": 2}])
 
     def test_game_input_pipeline_modes_and_tare(self):
+        self.page.set_viewport_size({"width": 320, "height": 844})
         self.page.locator('[data-tab="tabPatient"]').click()
         self.page.wait_for_function("document.querySelector('#tabPatient.active')")
         result = self.page.evaluate("""async () => {
@@ -509,17 +560,40 @@ class DoctorDashboardTests(unittest.TestCase):
             const engine = new GameEngine(state);
             window.engineInstance = engine;
             const selector = document.getElementById('gameInputMode');
+            const gameSelect = document.getElementById('gameSelect');
             const initialMode = selector.value;
+            const twoWayGames = [...gameSelect.options].map(opt => opt.value);
+            const initialFourWayControlsHidden = document.getElementById('fourWayOrientationControls').hidden;
+            const initialBalanceVisualizerHidden = document.getElementById('balanceBoardVisualizer').hidden;
+            const noDuplicateTareInPatientTab = !document.querySelector('#tabPatient #btnTareGameInput')
+                && !!document.querySelector('#gameContainer #btnTareGameInput');
+
             document.getElementById('authActivePanel').style.display = 'flex';
             const modeBounds = selector.getBoundingClientRect();
-            const tareBounds = document.getElementById('btnTareGameInput').getBoundingClientRect();
-            const controlsFit = modeBounds.width > 0 && modeBounds.right <= tareBounds.left
-                && tareBounds.right <= innerWidth;
+            const selectBounds = gameSelect.getBoundingClientRect();
+            const startBounds = document.getElementById('btnModeGame').getBoundingClientRect();
+            const recalBounds = document.getElementById('btnRecalibrate').getBoundingClientRect();
+            const controlsFit = modeBounds.width > 0 && modeBounds.right <= innerWidth
+                && selectBounds.width > 0 && selectBounds.right <= innerWidth
+                && startBounds.width > 0 && startBounds.right <= innerWidth
+                && recalBounds.width > 0 && recalBounds.right <= innerWidth
+                && document.documentElement.scrollWidth <= innerWidth;
+
             selector.value = 'four-direction';
             selector.dispatchEvent(new Event('change', {bubbles: true}));
             const selectedFourDirectionMode = engine.input.mode;
+            const fourWaySensitivity = engine.input.sensitivityDeg;
+            const fourWayGames = [...gameSelect.options].map(opt => opt.value);
+            const fourWayControlsVisible = !document.getElementById('fourWayOrientationControls').hidden
+                && !document.getElementById('balanceBoardVisualizer').hidden
+                && document.getElementById('circleIndicator').hidden
+                && !document.getElementById('dualAngleReadout').hidden;
+
             selector.value = 'two-direction';
             selector.dispatchEvent(new Event('change', {bubbles: true}));
+            const restoredTwoWayGames = [...gameSelect.options].map(opt => opt.value);
+            const twoWaySensitivity = engine.input.sensitivityDeg;
+
             window.RehabGames.register('four-axis-probe', class {}, {directions: 4});
             engine.activeGame = new window.RehabGames['four-axis-probe']();
             engine.applyInputMode();
@@ -530,10 +604,28 @@ class DoctorDashboardTests(unittest.TestCase):
             const taredPitch = engine.input.pitchTare;
             engine.activeGame = null;
             engine.applyInputMode();
-            return {horizontal, verticalInTwoDirectionMode, verticalInFourDirectionMode,
-                insideDeadzone, nonFiniteAxis, largeNegativeWrap, initialMode, selectedFourDirectionMode,
-                requiredMode, taredRoll, taredPitch, restoredMode: selector.value, controlsFit,
-                controlBounds: {viewport: innerWidth, mode: modeBounds.toJSON(), tare: tareBounds.toJSON()}};
+
+            commands.length = 0;
+            document.getElementById('btnRecalibrate').click();
+            const recalCommandSent = commands.length === 1 && commands[0][0] === 'recalibrate'
+                && engine.input.rollTare === 0 && engine.input.pitchTare === 0;
+
+            return {
+                horizontal, verticalInTwoDirectionMode, verticalInFourDirectionMode,
+                insideDeadzone, nonFiniteAxis, largeNegativeWrap, initialMode,
+                twoWayGames, fourWayGames, restoredTwoWayGames,
+                initialFourWayControlsHidden, initialBalanceVisualizerHidden, fourWayControlsVisible,
+                noDuplicateTareInPatientTab, fourWaySensitivity, twoWaySensitivity,
+                selectedFourDirectionMode, requiredMode, taredRoll, taredPitch,
+                restoredMode: selector.value, recalCommandSent, controlsFit,
+                controlBounds: {
+                    viewport: innerWidth,
+                    mode: modeBounds.toJSON(),
+                    gameSelect: selectBounds.toJSON(),
+                    start: startBounds.toJSON(),
+                    recal: recalBounds.toJSON()
+                }
+            };
         }""")
         self.assertAlmostEqual(result["horizontal"], (0.5 - 0.08) / 0.92)
         self.assertEqual(result["verticalInTwoDirectionMode"], 0)
@@ -542,11 +634,21 @@ class DoctorDashboardTests(unittest.TestCase):
         self.assertEqual(result["nonFiniteAxis"], 0)
         self.assertAlmostEqual(result["largeNegativeWrap"], (0.25 - 0.08) / 0.92)
         self.assertEqual(result["initialMode"], "two-direction")
+        self.assertEqual(result["twoWayGames"], ["pingpong", "balanceboard", "cardodge", "safecracker"])
+        self.assertEqual(result["fourWayGames"], ["balance3d", "vrdragon"])
+        self.assertEqual(result["restoredTwoWayGames"], ["pingpong", "balanceboard", "cardodge", "safecracker"])
+        self.assertTrue(result["initialFourWayControlsHidden"])
+        self.assertTrue(result["initialBalanceVisualizerHidden"])
+        self.assertTrue(result["fourWayControlsVisible"])
+        self.assertTrue(result["noDuplicateTareInPatientTab"])
+        self.assertEqual(result["fourWaySensitivity"], 15)
+        self.assertEqual(result["twoWaySensitivity"], 30)
         self.assertTrue(result["controlsFit"], result["controlBounds"])
         self.assertEqual(result["selectedFourDirectionMode"], "four-direction")
         self.assertEqual(result["requiredMode"], "four-direction")
         self.assertEqual((result["taredRoll"], result["taredPitch"]), (12, 18))
         self.assertEqual(result["restoredMode"], "two-direction")
+        self.assertTrue(result["recalCommandSent"])
 
     def test_dual_axis_polling_and_websocket_messages(self):
         result = self.page.evaluate("""async () => {

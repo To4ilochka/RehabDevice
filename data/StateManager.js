@@ -10,6 +10,11 @@ export class StateManager {
             currentFirmwareVersion: "unknown",
             targetAngle: 0,
             targetPitch: 0,
+            displayRoll: 0,
+            displayPitch: 0,
+            invertAxes: false,
+            invertPitch: false,
+            swapAxes: false,
             gameInputMode: "two-direction",
             calibMin: -20,
             calibMax: 20,
@@ -36,12 +41,10 @@ export class StateManager {
     }
 
     updateMultiple(updates) {
-        let changed = false;
         for (const [key, value] of Object.entries(updates)) {
             if (this.state[key] !== value) {
                 this.state[key] = value;
                 this.notify(key, value);
-                changed = true;
             }
         }
     }

@@ -1,6 +1,11 @@
 const TWO_DIRECTION = "two-direction";
 const FOUR_DIRECTION = "four-direction";
 
+const MODE_INPUT_PROFILES = {
+    [TWO_DIRECTION]: { deadzone: 0.08, sensitivityDeg: 30 },
+    [FOUR_DIRECTION]: { deadzone: 0.05, sensitivityDeg: 15 }
+};
+
 const shortestAngleDelta = (angle, origin) => {
     const delta = Number(angle) - Number(origin);
     if (!Number.isFinite(delta)) return 0;
@@ -37,6 +42,11 @@ export class GameInput {
     tare() {
         if (Number.isFinite(this.roll)) this.rollTare = this.roll;
         if (Number.isFinite(this.pitch)) this.pitchTare = this.pitch;
+    }
+
+    resetTare() {
+        this.rollTare = 0;
+        this.pitchTare = 0;
     }
 
     normalize(angle, origin = 0) {
@@ -87,10 +97,19 @@ export class GameEngine {
         };
         
         this.currentAngle = 0;
+        this.currentPitch = 0;
+        this.rawRoll = 0;
+        this.rawPitch = 0;
+        this.rawRollTare = 0;
+        this.rawPitchTare = 0;
+        this.invertX = Boolean(this.stateManager.get('invertAxes'));
+        this.invertY = Boolean(this.stateManager.get('invertPitch'));
+        this.swapAxes = Boolean(this.stateManager.get('swapAxes'));
+        this.axisInverted = this.invertX;
+
         this.activeGame = null;
         this.input = new GameInput();
         this.userInputMode = this.stateManager.get('gameInputMode') || TWO_DIRECTION;
-        this.axisInverted = false;
         this.animationId = null;
         this.lastTime = 0;
         this.lastAngleSampleTime = null;
@@ -140,6 +159,29 @@ export class GameEngine {
         window.addEventListener('resize', this.handleResize);
     }
 
+    _mapOrientation(rawRoll, rawPitch) {
+        const baseX = this.swapAxes ? rawPitch : rawRoll;
+        const baseY = this.swapAxes ? rawRoll : rawPitch;
+        return {
+            roll: (this.invertX ? -baseX : baseX) || 0,
+            pitch: (this.invertY ? -baseY : baseY) || 0
+        };
+    }
+
+    _unmapOrientation(effRoll, effPitch) {
+        const uninvX = (this.invertX ? -effRoll : effRoll) || 0;
+        const uninvY = (this.invertY ? -effPitch : effPitch) || 0;
+        return {
+            rawRoll: this.swapAxes ? uninvY : uninvX,
+            rawPitch: this.swapAxes ? uninvX : uninvY
+        };
+    }
+
+    _applyModeSensitivity(mode) {
+        const profile = MODE_INPUT_PROFILES[mode] || MODE_INPUT_PROFILES[TWO_DIRECTION];
+        this.input.configure(profile);
+    }
+
     resizeCanvas(canvas) {
         const bounds = canvas.parentElement ? canvas.parentElement.getBoundingClientRect() : canvas.getBoundingClientRect();
         const width = Math.max(1, Math.round(bounds.width || canvas.clientWidth || 1));
@@ -178,6 +220,22 @@ export class GameEngine {
         window.removeEventListener('resize', this.handleResize);
     }
 
+    setRawAngles(rawRoll, rawPitch) {
+        const now = performance.now();
+        if (this.lastAngleSampleTime !== null) {
+            this.angleSampleInterval = Math.min((now - this.lastAngleSampleTime) / 1000, 0.5);
+        }
+        this.lastAngleSampleTime = now;
+        if (Number.isFinite(Number(rawRoll))) this.rawRoll = Number(rawRoll);
+        if (Number.isFinite(Number(rawPitch))) this.rawPitch = Number(rawPitch);
+        const mapped = this._mapOrientation(this.rawRoll, this.rawPitch);
+        this.input.setAngles(mapped.roll, mapped.pitch);
+        this.stateManager.updateMultiple({
+            targetAngle: this.input.roll,
+            targetPitch: this.input.pitch
+        });
+    }
+
     setTargetAngle(angle) {
         this.setTargetAngles(angle, this.input.pitch);
     }
@@ -189,23 +247,50 @@ export class GameEngine {
         }
         this.lastAngleSampleTime = now;
         this.input.setAngles(roll, pitch);
-        this.stateManager.updateMultiple({ targetAngle: this.input.roll, targetPitch: this.input.pitch });
+        const unmapped = this._unmapOrientation(this.input.roll, this.input.pitch);
+        this.rawRoll = unmapped.rawRoll;
+        this.rawPitch = unmapped.rawPitch;
+        this.stateManager.updateMultiple({
+            targetAngle: this.input.roll,
+            targetPitch: this.input.pitch
+        });
+    }
+
+    setAxisOrientation({ invertX = this.invertX, invertY = this.invertY, swapAxes = this.swapAxes } = {}) {
+        const nextInvertX = Boolean(invertX);
+        const nextInvertY = Boolean(invertY);
+        const nextSwapAxes = Boolean(swapAxes);
+        if (nextInvertX === this.invertX && nextInvertY === this.invertY && nextSwapAxes === this.swapAxes) {
+            return;
+        }
+        this.invertX = nextInvertX;
+        this.invertY = nextInvertY;
+        this.swapAxes = nextSwapAxes;
+        this.axisInverted = nextInvertX;
+
+        const mappedCurrent = this._mapOrientation(this.rawRoll, this.rawPitch);
+        const mappedTare = this._mapOrientation(this.rawRollTare, this.rawPitchTare);
+        this.input.roll = mappedCurrent.roll;
+        this.input.pitch = mappedCurrent.pitch;
+        this.input.rollTare = mappedTare.roll;
+        this.input.pitchTare = mappedTare.pitch;
+
+        this.stateManager.updateMultiple({
+            invertAxes: this.invertX,
+            invertPitch: this.invertY,
+            swapAxes: this.swapAxes,
+            targetAngle: this.input.roll,
+            targetPitch: this.input.pitch
+        });
     }
 
     setAxisInversion(inverted) {
         const nextInverted = Boolean(inverted);
-        if (nextInverted !== this.axisInverted) {
-            this.axisInverted = nextInverted;
-            this.input.roll = -this.input.roll || 0;
-            this.input.pitch = -this.input.pitch || 0;
-            this.input.rollTare = -this.input.rollTare || 0;
-            this.input.pitchTare = -this.input.pitchTare || 0;
-            this.stateManager.updateMultiple({
-                invertAxes: nextInverted,
-                targetAngle: this.input.roll,
-                targetPitch: this.input.pitch
-            });
-        }
+        this.setAxisOrientation({
+            invertX: nextInverted,
+            invertY: nextInverted,
+            swapAxes: this.swapAxes
+        });
     }
 
     setInputMode(mode) {
@@ -213,6 +298,7 @@ export class GameEngine {
         this.userInputMode = nextMode;
         if (this.activeGame) {
             this.input.mode = nextMode;
+            this._applyModeSensitivity(nextMode);
             this.activeGame.inputMode = nextMode;
             this.stateManager.update('gameInputMode', nextMode);
             const selector = document.getElementById("gameInputMode");
@@ -229,6 +315,7 @@ export class GameEngine {
             || requirements.mode === "4way";
         const mode = isFourWay ? FOUR_DIRECTION : this.userInputMode;
         this.input.mode = mode;
+        this._applyModeSensitivity(mode);
         if (this.activeGame) {
             this.activeGame.inputMode = mode;
         }
@@ -239,6 +326,26 @@ export class GameEngine {
 
     tareInput() {
         this.input.tare();
+        const unmappedTare = this._unmapOrientation(this.input.rollTare, this.input.pitchTare);
+        this.rawRollTare = unmappedTare.rawRoll;
+        this.rawPitchTare = unmappedTare.rawPitch;
+    }
+
+    resetTare() {
+        this.rawRoll = 0;
+        this.rawPitch = 0;
+        this.rawRollTare = 0;
+        this.rawPitchTare = 0;
+        this.currentAngle = 0;
+        this.currentPitch = 0;
+        this.input.setAngles(0, 0);
+        this.input.resetTare();
+        this.stateManager.updateMultiple({
+            targetAngle: 0,
+            targetPitch: 0,
+            displayRoll: 0,
+            displayPitch: 0
+        });
     }
 
     loadGame(gameId, callback) {
@@ -288,7 +395,7 @@ export class GameEngine {
             GameClass.inputRequirements = GameClass.inputRequirements || { directions: 2, inputMode: "2way" };
             this.activeGame = new GameClass(ctx, this.api);
             this.applyInputMode();
-            this.input.tare();
+            this.tareInput();
             
             const calibMin = this.stateManager.get('calibMin');
             const calibMax = this.stateManager.get('calibMax');
@@ -359,23 +466,46 @@ export class GameEngine {
         if (!Number.isFinite(dt) || dt < 0 || dt > 0.1) dt = 0.016;
         
         const rawTargetAngle = Number(this.stateManager.get('targetAngle'));
+        const rawTargetPitch = Number(this.stateManager.get('targetPitch'));
         const targetAngle = Number.isFinite(rawTargetAngle) ? rawTargetAngle : this.input.roll;
+        const targetPitch = Number.isFinite(rawTargetPitch) ? rawTargetPitch : this.input.pitch;
         if (!Number.isFinite(this.currentAngle)) this.currentAngle = targetAngle;
+        if (!Number.isFinite(this.currentPitch)) this.currentPitch = targetPitch;
         
-        // Smooth interpolation only for visual circle indicator
+        // Smooth interpolation only for visual circle / 2D balance board indicator
         const smoothingDuration = Math.max(1 / 15, this.angleSampleInterval);
         const alpha = 1.0 - Math.exp(-dt / smoothingDuration);
-        const angleDelta = ((targetAngle - this.currentAngle + 180) % 360 + 360) % 360 - 180;
+        const angleDelta = shortestAngleDelta(targetAngle, this.currentAngle);
+        const pitchDelta = shortestAngleDelta(targetPitch, this.currentPitch);
         this.currentAngle = this.currentAngle + angleDelta * alpha;
+        this.currentPitch = this.currentPitch + pitchDelta * alpha;
         
-        // Render UI circle indicator with smoothed angle
+        // Render 1D wrist circle indicator
         const circle = document.getElementById("circleIndicator");
-        if (circle) {
+        if (circle && !circle.hidden) {
             circle.style.transform = `rotate(${this.currentAngle}deg)`;
+        }
+
+        // Render 2D balance board bubble puck when in 4-direction mode
+        const balanceBoard = document.getElementById("balanceBoardVisualizer");
+        const puck = document.getElementById("balancePuck");
+        if (balanceBoard && puck && !balanceBoard.hidden) {
+            const maxOffsetPx = Math.max(36, (balanceBoard.clientWidth || 190) * 0.37);
+            const fullScaleDeg = 20;
+            let normX = this.currentAngle / fullScaleDeg;
+            let normY = this.currentPitch / fullScaleDeg;
+            const radialMag = Math.hypot(normX, normY);
+            if (radialMag > 1) {
+                normX /= radialMag;
+                normY /= radialMag;
+            }
+            const offsetX = normX * maxOffsetPx;
+            const offsetY = -normY * maxOffsetPx;
+            puck.style.transform = `translate(${offsetX.toFixed(1)}px, ${offsetY.toFixed(1)}px)`;
         }
         
         if (this.isRunning && this.activeGame) {
-            // Games receive RAW targetAngle for instant reaction (no smoothing delay)
+            // Games receive RAW targetAngle & GameInput for instant reaction (no smoothing delay)
             this.activeGame.update(targetAngle, dt, this.input);
             const canvas = document.getElementById("mainGameCanvas");
             if (canvas && this.activeGame) {
@@ -385,8 +515,9 @@ export class GameEngine {
             const min = Number(this.stateManager.get('calibMin'));
             const max = Number(this.stateManager.get('calibMax'));
             const safeMin = Number.isFinite(min) ? min : -20;
-            const safeMax = Number.isFinite(max) ? max : 20;
-            this.api.updateHUD("hudAmplitude", `Амплітуда: [${safeMin.toFixed(1)}° .. ${safeMax.toFixed(1)}°]`);
+            const safeMax = Number(max);
+            const clampedMax = Number.isFinite(safeMax) ? safeMax : 20;
+            this.api.updateHUD("hudAmplitude", `Амплітуда: [${safeMin.toFixed(1)}° .. ${clampedMax.toFixed(1)}°]`);
         }
         
         this.animationId = requestAnimationFrame(this.loop);

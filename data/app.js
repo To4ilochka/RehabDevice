@@ -1,6 +1,6 @@
 import { StateManager } from './StateManager.js';
 import { NetworkService } from './NetworkService.js';
-import { UIManager } from './UIManager.js?v=7';
+import { UIManager } from './UIManager.js?v=8';
 import { GameEngine } from './GameEngine.js';
 
 function initApp() {
@@ -18,11 +18,9 @@ function initApp() {
     
     networkService.onMessage((data) => {
         if (data.type === "angle") {
-            const invertToggle = document.getElementById("invertAngleToggle");
-            const invert = invertToggle && invertToggle.checked ? -1 : 1;
-            const roll = Number(data.roll ?? data.angle ?? 0) * invert;
-            const pitch = Number(data.pitch ?? 0) * invert;
-            gameEngine.setTargetAngles(roll, pitch);
+            const rawRoll = Number(data.roll ?? data.angle ?? 0);
+            const rawPitch = Number(data.pitch ?? 0);
+            gameEngine.setRawAngles(rawRoll, rawPitch);
         } else if (data.type === "status") {
             stateManager.updateMultiple({
                 globalSdAvailable: data.sdAvailable !== false,
