@@ -781,7 +781,7 @@ tr:hover td {
 .info-note { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; }
 .active-patient-badge { padding: 1rem; background: rgba(0, 230, 118, 0.1); border: 1px solid rgba(0, 230, 118, 0.3); border-radius: 12px; }
 .active-patient-title { font-size: 1.25rem; color: var(--accent-green); margin-top: 0.25rem; }
-.select-dark { flex: 1; padding: 0.5rem; color: #ffffff; background-color: #1e293b; -webkit-appearance: none; appearance: none; }
+.select-dark { flex: 1; min-width: 0; padding: 0.5rem; color: #ffffff; background-color: #1e293b; -webkit-appearance: none; appearance: none; }
 #authActivePanel .game-input-controls { min-width: 0; }
 #gameInputMode { min-width: 0; }
 .btn-gradient-primary { background: linear-gradient(135deg, #ff007a, #7928ca); color: white; border: none; font-weight: 600; box-shadow: 0 4px 15px rgba(255, 0, 122, 0.4); padding: 0.5rem 1rem; }
@@ -925,8 +925,8 @@ main {
 
 /* Game overlays */
 .game-overlay { position: fixed; inset: 0; z-index: 9999; background: #000; flex-direction: column; }
-.game-overlay-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px; background: #0f172a; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.game-overlay-header { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: space-between; align-items: center; padding: 10px 20px; background: #0f172a; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .game-engine-wrapper { flex: 1; position: relative; overflow: hidden; }
-.game-hud { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; box-sizing: border-box; justify-content: space-between; color: rgba(255,255,255,0.8); font-size: 14px; font-weight: 600; pointer-events: none; z-index: 5; }
+.game-hud { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; box-sizing: border-box; flex-wrap: wrap; gap: 0.5rem; justify-content: space-between; color: rgba(255,255,255,0.8); font-size: 14px; font-weight: 600; pointer-events: none; z-index: 5; }
 .custom-game-ui { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
 .game-placeholder { position: absolute; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; z-index: 10; }

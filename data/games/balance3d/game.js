@@ -15,6 +15,7 @@ class Balance3DGame {
         const bounds = canvas.getBoundingClientRect();
         this.resize(bounds.width || canvas.clientWidth || 1, bounds.height || canvas.clientHeight || 1);
         this.active = true;
+        this.bestTime = 0;
         this._resetRound();
     }
 
@@ -24,8 +25,8 @@ class Balance3DGame {
     }
 
     _resetRound() {
+        this.bestTime = Math.max(this.bestTime || 0, this.roundTime || 0);
         this.roundTime = 0;
-        this.bestTime = Math.max(this.bestTime || 0, this.roundTime);
         this.robotX = 0;
         this.robotY = 0;
         this.velocityX = 0;

@@ -36,6 +36,9 @@ function initApp() {
                     currentPatientName: data.patientId
                 });
             } else if (stateManager.get('isAuthorized') && !data.sessionActive) {
+                if (gameEngine.isRunning || stateManager.get('currentAppMode') === 'game') {
+                    gameEngine.stopGame();
+                }
                 stateManager.update('isAuthorized', false);
             }
         } else if (data.type === "liveStats") {

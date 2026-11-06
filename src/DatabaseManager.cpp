@@ -252,6 +252,29 @@ int DatabaseManager::stepStatement(sqlite3_stmt* stmt) {
     return rc;
 }
 
+int DatabaseManager::stepSessionRow(sqlite3_stmt* stmt, JsonDocument& doc) {
+    if (!stmt) return SQLITE_MISUSE;
+    xSemaphoreTake(dbMutex, portMAX_DELAY);
+    int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        const unsigned char* patientText = sqlite3_column_text(stmt, 1);
+        const unsigned char* dateText = sqlite3_column_text(stmt, 3);
+        doc["id"] = sqlite3_column_int(stmt, 0);
+        doc["patientId"] = patientText ? reinterpret_cast<const char*>(patientText) : "";
+        doc["timestamp"] = sqlite3_column_int(stmt, 2);
+        doc["dateStr"] = dateText ? reinterpret_cast<const char*>(dateText) : "";
+        doc["minAngle"] = sqlite3_column_double(stmt, 4);
+        doc["maxAngle"] = sqlite3_column_double(stmt, 5);
+        doc["amplitude"] = sqlite3_column_double(stmt, 6);
+        doc["avgSpeed"] = sqlite3_column_double(stmt, 7);
+        doc["smoothness"] = sqlite3_column_double(stmt, 8);
+        doc["flexionsCount"] = sqlite3_column_int(stmt, 9);
+        doc["sessionDuration"] = sqlite3_column_double(stmt, 10);
+    }
+    xSemaphoreGive(dbMutex);
+    return rc;
+}
+
 void DatabaseManager::finalizeStatement(sqlite3_stmt* stmt) {
     if (!stmt) return;
     xSemaphoreTake(dbMutex, portMAX_DELAY);

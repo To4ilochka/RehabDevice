@@ -55,8 +55,12 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
     init(canvas, options) {
         options = options || {};
         this.ctx = canvas.getContext("2d");
-        this.calibMin = options.calibMin ?? -20;
-        this.calibMax = options.calibMax ?? 20;
+        this.calibMin = Number.isFinite(options.calibMin) ? options.calibMin : -20;
+        this.calibMax = Number.isFinite(options.calibMax) ? options.calibMax : 20;
+        if (this.calibMax <= this.calibMin) {
+            this.calibMin = -20;
+            this.calibMax = 20;
+        }
         this.difficulty = options.difficulty || 'auto';
 
         this.resize(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
@@ -81,8 +85,8 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
     }
     
     resize(width, height) {
-        this.width = width;
-        this.height = height;
+        this.width = Math.max(1, Number(width) || 1);
+        this.height = Math.max(1, Number(height) || 1);
         
         this.roadMargin = Math.max(20, this.width * 0.05);
         this.roadLeft = this.roadMargin;
@@ -99,9 +103,11 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
     }
     
     mapAngleToScreen(angle) {
-        let clamped = Math.max(this.calibMin, Math.min(this.calibMax, angle));
-        let normalized = (clamped - this.calibMin) / (this.calibMax - this.calibMin);
-        if (isNaN(normalized)) normalized = 0.5;
+        const safeAngle = Number.isFinite(angle) ? angle : (this.calibMin + this.calibMax) / 2;
+        const clamped = Math.max(this.calibMin, Math.min(this.calibMax, safeAngle));
+        const range = this.calibMax - this.calibMin;
+        let normalized = range > 0 ? (clamped - this.calibMin) / range : 0.5;
+        if (!Number.isFinite(normalized)) normalized = 0.5;
         
         let minX = this.roadLeft + this.player.w / 2;
         let maxX = this.roadRight - this.player.w / 2;
@@ -127,7 +133,7 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
     }
     
     spawnEnemy() {
-        // Умний алгоритм спавну: завжди залишаємо безпечний коридор
+        // Розумний алгоритм спавну: завжди залишаємо безпечний коридор
         let allLanes = [0, 1, 2, 3, 4];
         let availableLanes = allLanes.filter(l => !this.recentLanes.includes(l));
         
@@ -163,7 +169,7 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
     penalize() {
         if (this.player.hitCooldown > 0) return;
         
-        // Зкидаємо комбо та віднімаємо очки
+        // Скидаємо комбо та віднімаємо очки
         this.comboMultiplier = 1;
         this.timeWithoutHit = 0;
         this.score = Math.max(0, this.score - 5);
@@ -181,18 +187,21 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
     }
     
     update(currentAngle, dt) {
-        if (dt > 0.1) dt = 0.016; // Захист від лагів
+        if (!Number.isFinite(dt) || dt < 0 || dt > 0.1) dt = 0.016; // Захист від лагів
 
+        const safeAngle = Number.isFinite(currentAngle) ? currentAngle : (this.calibMin + this.calibMax) / 2;
         let boundsChanged = false;
-        if (currentAngle > this.calibMax) { this.calibMax += (currentAngle - this.calibMax) * 0.05; boundsChanged = true; }
-        if (currentAngle < this.calibMin) { this.calibMin -= (this.calibMin - currentAngle) * 0.05; boundsChanged = true; }
+        if (Number.isFinite(currentAngle)) {
+            if (currentAngle > this.calibMax) { this.calibMax += (currentAngle - this.calibMax) * 0.05; boundsChanged = true; }
+            if (currentAngle < this.calibMin) { this.calibMin -= (this.calibMin - currentAngle) * 0.05; boundsChanged = true; }
+        }
         if (boundsChanged) {
             this.syncCalibration();
         }
         
         // Плавне переміщення гравця (Lerp)
-        let targetX = this.mapAngleToScreen(currentAngle);
-        if (!isNaN(targetX)) {
+        let targetX = this.mapAngleToScreen(safeAngle);
+        if (Number.isFinite(targetX)) {
             this.player.x += (targetX - this.player.x) * 12 * dt;
         }
         
@@ -299,12 +308,14 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
     }
     
     draw(ctx) {
+        this.ctx = ctx;
+        ctx.save();
         
         // Фон
         ctx.fillStyle = '#2d3748';
         ctx.fillRect(0, 0, this.width, this.height);
         
-        // Обочини
+        // Узбіччя
         let grassGrad = ctx.createLinearGradient(0, 0, this.roadMargin, 0);
         grassGrad.addColorStop(0, '#2e7d32');
         grassGrad.addColorStop(1, '#1b5e20');
@@ -317,7 +328,7 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
         ctx.fillStyle = grassGradRight;
         ctx.fillRect(this.width - this.roadMargin, 0, this.roadMargin, this.height);
         
-        // Смуги на обочинах (для ілюзії швидкості)
+        // Смуги на узбіччях (для ілюзії швидкості)
         ctx.fillStyle = '#388e3c';
         for (let y = -40 + this.roadOffset; y < this.height; y += 40) {
             ctx.fillRect(0, y, this.roadMargin, 20);
@@ -354,9 +365,11 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
             ctx.fillStyle = `rgba(255, 23, 68, ${alpha})`;
             ctx.fillRect(0, 0, this.width, this.height);
         }
+        ctx.restore();
     }
     
     stop() {
-        this.enemies = [];
+        this.enemies.length = 0;
+        this.recentLanes.length = 0;
     }
 };

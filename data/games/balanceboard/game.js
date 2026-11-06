@@ -74,8 +74,12 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
     init(canvas, options) {
         options = options || {};
         this.ctx = canvas.getContext("2d");
-        this.calibMin = options.calibMin ?? -20;
-        this.calibMax = options.calibMax ?? 20;
+        this.calibMin = Number.isFinite(options.calibMin) ? options.calibMin : -20;
+        this.calibMax = Number.isFinite(options.calibMax) ? options.calibMax : 20;
+        if (this.calibMax <= this.calibMin) {
+            this.calibMin = -20;
+            this.calibMax = 20;
+        }
         this.difficulty = options.difficulty || 'auto';
 
         this.resize(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
@@ -85,8 +89,8 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
     }
 
     resize(width, height) {
-        this.width = width;
-        this.height = height;
+        this.width = Math.max(1, Number(width) || 1);
+        this.height = Math.max(1, Number(height) || 1);
     }
 
     _resetRound() {
@@ -135,16 +139,19 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
     }
 
     update(currentAngle, dt) {
-        if (dt > 0.1) dt = 0.016;
+        if (!Number.isFinite(dt) || dt < 0 || dt > 0.1) dt = 0.016;
 
+        const safeAngle = Number.isFinite(currentAngle) ? currentAngle : (this.calibMin + this.calibMax) / 2;
         let boundsChanged = false;
-        if (currentAngle > this.calibMax) {
-            this.calibMax += (currentAngle - this.calibMax) * 0.08;
-            boundsChanged = true;
-        }
-        if (currentAngle < this.calibMin) {
-            this.calibMin -= (this.calibMin - currentAngle) * 0.08;
-            boundsChanged = true;
+        if (Number.isFinite(currentAngle)) {
+            if (currentAngle > this.calibMax) {
+                this.calibMax += (currentAngle - this.calibMax) * 0.08;
+                boundsChanged = true;
+            }
+            if (currentAngle < this.calibMin) {
+                this.calibMin -= (this.calibMin - currentAngle) * 0.08;
+                boundsChanged = true;
+            }
         }
         if (boundsChanged) this.api.updateCalibration(this.calibMin, this.calibMax);
 
@@ -184,7 +191,8 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
         this.difficultyLevel = Math.min(10, 1 + this.survivalTime / 20); 
 
         let range = this.calibMax - this.calibMin;
-        let normalized = range > 0 ? (currentAngle - this.calibMin) / range : 0.5;
+        let normalized = range > 0 ? (safeAngle - this.calibMin) / range : 0.5;
+        if (!Number.isFinite(normalized)) normalized = 0.5;
         normalized = Math.max(0, Math.min(1, normalized));
         
         let maxBoardTilt = 22; 
@@ -229,7 +237,7 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
         this.robotX += this.robotVelocity * dt;
 
         let platW = this.width * 0.55;
-        let edgeDist = platW / 2 - 8; 
+        let edgeDist = Math.max(1, platW / 2 - 8); 
         
         this.dangerLevel = Math.min(1, Math.abs(this.robotX) / edgeDist);
         this.dangerPulse += dt * (3 + this.dangerLevel * 10);
@@ -377,7 +385,7 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
         }
     }
 
-    // === ТЕ САМЫЕ ЧАСТИЦЫ КОТОРЫЕ Я СЛУЧАЙНО УДАЛИЛ ===
+    // === Відмальовка частинок ефектів ===
     _drawParticles(ctx) {
         for (let p of this.particles) {
             ctx.globalAlpha = Math.max(0, p.life);
@@ -441,7 +449,7 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
             ctx.restore();
         }
 
-        // Вызов отрисовки частиц
+        // Виклик відмальовки частинок
         this._drawParticles(ctx);
         
         this._drawDangerVignette(ctx, W, H);
@@ -840,6 +848,7 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
 
     stop() {
         this.isActive = false;
-        this.particles = [];
+        this.particles.length = 0;
+        this.stars.length = 0;
     }
 };

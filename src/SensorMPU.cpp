@@ -18,7 +18,7 @@ void IRAM_ATTR SensorMPU::dmpDataReadyISR() {
 SensorMPU::SensorMPU() : dmpReady(false), mpuIntStatus(0), devStatus(0), packetSize(0), fifoCount(0),
                          pitchOffset(0.0f), rollOffset(0.0f), yawOffset(0.0f),
                          dataMutex(nullptr), mutexMissCount(0),
-                         calState(CAL_IDLE), calWaitStartTime(0) {
+                         calState(CAL_IDLE), calWaitStartTime(0), recalibratePending(false) {
     memset(&currentData, 0, sizeof(currentData));
     dataMutex = xSemaphoreCreateMutex();
     if (dataMutex == nullptr) {
@@ -96,6 +96,14 @@ bool SensorMPU::init() {
 void SensorMPU::update() {
     if (!dmpReady) return;
 
+    if (__atomic_exchange_n(&recalibratePending, false, __ATOMIC_ACQUIRE)) {
+        mpu.resetFIFO();
+        fifoCount = 0;
+        calState = CAL_WAITING_FIFO;
+        calWaitStartTime = millis();
+        return;
+    }
+
     if (calState == CAL_WAITING_FIFO) {
         if (millis() - calWaitStartTime > 3000) {
             Serial.println("[SensorMPU] Recalibration timeout!");
@@ -150,8 +158,6 @@ void SensorMPU::update() {
 
     if ((mpuIntStatus & 0x02) || fifoCount >= packetSize) {
         if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) {
-            fifoCount = mpu.getFIFOCount();
-
             mpu.dmpGetQuaternion(&q, fifoBuffer);
 
             float normSq = q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z;
@@ -205,10 +211,7 @@ bool SensorMPU::recalibrate() {
     if (!dmpReady) return false;
 
     Serial.println("[SensorMPU] Performing on-the-fly recalibration...");
-    
-    mpu.resetFIFO();
-    calState = CAL_WAITING_FIFO;
-    calWaitStartTime = millis();
+    __atomic_store_n(&recalibratePending, true, __ATOMIC_RELEASE);
 
     return true;
 }
