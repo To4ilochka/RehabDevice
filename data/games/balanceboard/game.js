@@ -71,12 +71,14 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
         this.POST_FALL_DURATION = 2.5;
     }
 
-    init(calibMin, calibMax, difficulty) {
-        this.calibMin = calibMin;
-        this.calibMax = calibMax;
-        this.difficulty = difficulty || 'auto';
+    init(canvas, options) {
+        options = options || {};
+        this.ctx = canvas.getContext("2d");
+        this.calibMin = options.calibMin ?? -20;
+        this.calibMax = options.calibMax ?? 20;
+        this.difficulty = options.difficulty || 'auto';
 
-        this.resize(this.ctx.canvas.width, this.ctx.canvas.height);
+        this.resize(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
         this._initStars();
         this._resetRound();
         this.updateHUD();
@@ -132,7 +134,7 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
         }
     }
 
-    update(dt, currentAngle) {
+    update(currentAngle, dt) {
         if (dt > 0.1) dt = 0.016;
 
         let boundsChanged = false;
@@ -399,8 +401,7 @@ window.RehabGames['balanceboard'] = class BalanceBoardGame {
         ctx.globalAlpha = 1;
     }
 
-    draw() {
-        const ctx = this.ctx;
+    draw(ctx) {
         const W = this.width;
         const H = this.height;
 

@@ -228,6 +228,88 @@ class DoctorDashboardTests(unittest.TestCase):
         expect(self.page.locator("#memoryText")).to_have_text("\u0421\u0442\u0430\u043d \u043d\u0435\u0432\u0456\u0434\u043e\u043c\u0438\u0439")
         self.assertEqual(self.page.locator(".memory-widget .memory-bar").count(), 0)
 
+    def test_safecracker_game_lifecycle_and_dpi(self):
+        self.page.set_viewport_size({"width": 320, "height": 700})
+        self.page.evaluate("""async () => {
+            Object.defineProperty(window, 'devicePixelRatio', {configurable: true, value: 2});
+            const {GameEngine} = await import('/GameEngine.js');
+            window.engine = new GameEngine(state);
+            document.getElementById('gameContainer').style.display = 'flex';
+            engine.startGame('safecracker');
+        }""")
+        self.page.wait_for_function("window.engine && engine.activeGame && engine.activeGame.constructor.name === 'SafeCrackerGame'")
+        result = self.page.evaluate("""() => {
+            const game = engine.activeGame;
+            const canvas = document.getElementById('mainGameCanvas');
+            game.update(179, 0);
+            const zeroDtTime = game.safeTime;
+            game.update(-179, 0);
+            game.draw(canvas.getContext('2d'));
+            const pixel = canvas.getContext('2d').getImageData(
+                Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data;
+            game.zoneWidth = 1;
+            game.targets = Array(game.comboLength).fill(game.dialPosition);
+            game.holdRequired = 0.1;
+            game.update(-179, 0.1);
+            game.update(-179, 0.1);
+            for (let frame = 0; frame < 11 && game.state === 'opening'; frame++) {
+                game.update(-179, 0.1);
+            }
+            return {
+                signatures: [game.init.length, game.update.length, game.draw.length],
+                zeroDtTime,
+                continuousAngle: game.continuousAngle,
+                wrappedPosition: game.dialPosition,
+                backingRatio: canvas.width / canvas.clientWidth,
+                rendered: pixel[3] > 0,
+                scoreText: document.getElementById('hudScore').textContent,
+                openedSafes: game.safesOpened,
+                score: game.score,
+                scrollFits: document.documentElement.scrollWidth <= innerWidth
+            };
+        }""")
+        self.assertEqual(result['signatures'], [2, 2, 1])
+        self.assertEqual(result['zeroDtTime'], 0)
+        self.assertEqual(result['continuousAngle'], 181)
+        self.assertEqual(result['wrappedPosition'], 1)
+        self.assertEqual(result['backingRatio'], 2)
+        self.assertTrue(result['rendered'])
+        self.assertIn("Сейфів відкрито", result['scoreText'])
+        self.assertEqual(result['openedSafes'], 1)
+        self.assertGreater(result['score'], 0)
+        self.assertTrue(result['scrollFits'])
+
+        stopped = self.page.evaluate("""() => {
+            const previous = engine.activeGame;
+            engine.stopGame();
+            document.getElementById('gameContainer').style.display = 'flex';
+            engine.startGame('safecracker');
+            return !previous.active && previous.particles.length === 0
+                && engine.activeGame !== previous && engine.activeGame.active;
+        }""")
+        self.assertTrue(stopped)
+
+        for game_id, class_name in [
+            ("pingpong", "PingPongGame"),
+            ("balanceboard", "BalanceBoardGame"),
+            ("cardodge", "CarDodgeGame"),
+        ]:
+            self.page.evaluate("""gameId => {
+                document.getElementById('gameContainer').style.display = 'flex';
+                engine.startGame(gameId);
+            }""", game_id)
+            self.page.wait_for_function(
+                "className => engine.activeGame && engine.activeGame.constructor.name === className",
+                arg=class_name,
+            )
+            self.page.evaluate("""() => {
+                const game = engine.activeGame;
+                game.update(0, 0);
+                game.draw(document.getElementById('mainGameCanvas').getContext('2d'));
+            }""")
+            self.page.evaluate("engine.stopGame()")
+
+
     def assert_no_letter_stacking(self):
         """Every table cell must keep several characters per rendered line."""
         offenders = self.page.evaluate("""() => {

@@ -52,12 +52,14 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
         return this.roadLeft + this.laneWidth * lane + this.laneWidth / 2;
     }
 
-    init(calibMin, calibMax, difficulty) {
-        this.calibMin = calibMin;
-        this.calibMax = calibMax;
-        this.difficulty = difficulty || 'auto';
-        
-        this.resize(this.ctx.canvas.width, this.ctx.canvas.height);
+    init(canvas, options) {
+        options = options || {};
+        this.ctx = canvas.getContext("2d");
+        this.calibMin = options.calibMin ?? -20;
+        this.calibMax = options.calibMax ?? 20;
+        this.difficulty = options.difficulty || 'auto';
+
+        this.resize(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
         this.resetGame();
         this.updateHUD();
     }
@@ -178,7 +180,7 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
         this.updateHUD("💥 Аварія! Комбо скинуто");
     }
     
-    update(dt, currentAngle) {
+    update(currentAngle, dt) {
         if (dt > 0.1) dt = 0.016; // Захист від лагів
 
         let boundsChanged = false;
@@ -296,8 +298,7 @@ window.RehabGames['cardodge'] = class CarDodgeGame {
         ctx.restore();
     }
     
-    draw() {
-        const ctx = this.ctx;
+    draw(ctx) {
         
         // Фон
         ctx.fillStyle = '#2d3748';

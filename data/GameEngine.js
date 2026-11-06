@@ -37,13 +37,30 @@ export class GameEngine {
         window.addEventListener('resize', () => {
             if (this.activeGame && this.isRunning) {
                 const canvas = document.getElementById("mainGameCanvas");
-                if (canvas && canvas.parentElement) {
-                    canvas.width = canvas.parentElement.clientWidth;
-                    canvas.height = canvas.parentElement.clientHeight;
-                    if (this.activeGame.resize) this.activeGame.resize(canvas.width, canvas.height);
+                if (canvas) {
+                    const size = this.resizeCanvas(canvas);
+                    if (this.activeGame.resize) this.activeGame.resize(size.width, size.height);
                 }
             }
         });
+    }
+
+    resizeCanvas(canvas) {
+        const bounds = canvas.parentElement.getBoundingClientRect();
+        const width = Math.max(1, Math.round(bounds.width));
+        const height = Math.max(1, Math.round(bounds.height));
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        const backingWidth = Math.round(width * pixelRatio);
+        const backingHeight = Math.round(height * pixelRatio);
+
+        if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+            canvas.width = backingWidth;
+            canvas.height = backingHeight;
+        }
+
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        return { ctx, width, height };
     }
 
     start() {
@@ -74,23 +91,20 @@ export class GameEngine {
     startGame(gameId) {
         this.loadGame(gameId, () => {
             const canvas = document.getElementById("mainGameCanvas");
-            const ctx = canvas.getContext("2d");
             
             if (this.activeGame && this.activeGame.stop) {
                 this.activeGame.stop();
             }
             this.api.clearCustomHTML();
-            
-            canvas.width = canvas.parentElement.clientWidth;
-            canvas.height = canvas.parentElement.clientHeight;
+
+            const { ctx } = this.resizeCanvas(canvas);
             
             const GameClass = window.RehabGames[gameId];
             this.activeGame = new GameClass(ctx, this.api);
-            if (this.activeGame.resize) this.activeGame.resize(canvas.width, canvas.height);
             
             const calibMin = this.stateManager.get('calibMin');
             const calibMax = this.stateManager.get('calibMax');
-            this.activeGame.init(calibMin, calibMax);
+            this.activeGame.init(canvas, { calibMin, calibMax, difficulty: 'auto' });
             
             document.getElementById("gamePlaceholder").style.display = "none";
             document.getElementById("gameHUD").style.display = "flex";
@@ -142,8 +156,8 @@ export class GameEngine {
         
         if (this.isRunning && this.activeGame) {
             // Games receive RAW targetAngle for instant reaction (no smoothing delay)
-            this.activeGame.update(dt, targetAngle);
-            this.activeGame.draw();
+            this.activeGame.update(targetAngle, dt);
+            this.activeGame.draw(document.getElementById("mainGameCanvas").getContext("2d"));
             
             const min = this.stateManager.get('calibMin');
             const max = this.stateManager.get('calibMax');

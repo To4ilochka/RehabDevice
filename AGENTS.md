@@ -120,7 +120,7 @@ The web server is started before `sysCommandQueue` is created. If changing start
 - `UIManager` owns the dashboard DOM. The ALL view includes every loaded session; selecting a patient filters the same eight-column history table. The table intentionally scrolls horizontally inside its container on mobile and cells remain single-line. Keep document-level horizontal overflow out of responsive changes.
 - The dashboard validates a target norm in the inclusive 10..180 range and calculates recovery percentage. Historical chart amplitudes can exceed 180; the chart raises its Y maximum dynamically. Reject non-finite chart coordinates and preserve the empty/loading/error/no-results states.
 - CSV export is created in-browser from loaded sessions. Preserve Ukrainian column labels, text escaping, and existing session semantics.
-- Games are loaded from `/games/<id>/game.js` on first use and registered under `window.RehabGames`. Keep each game compatible with the `init`, `update`, `draw`, optional `resize`, and `stop` lifecycle used by `GameEngine`.
+- Games are loaded from `/games/<id>/game.js` on first use and registered under `window.RehabGames`. Each game implements `init(canvas, options)`, `update(angle, dt)`, `draw(ctx)`, optional `resize(width, height)`, and `stop()`; `GameEngine` supplies CSS-pixel dimensions while scaling the canvas backing store for device pixel ratio.
 - UI strings and exported reports are Ukrainian. The release checker requires external Internet access to GitHub; local monitoring, API, and static assets are served by the device.
 
 ## Hardware, Flash, And Configuration

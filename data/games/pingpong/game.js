@@ -33,12 +33,14 @@ window.RehabGames['pingpong'] = class PingPongGame {
         this.botReactionDelayTimer = 0;
     }
     
-    init(calibMin, calibMax) {
-        this.calibMin = calibMin;
-        this.calibMax = calibMax;
+    init(canvas, options) {
+        options = options || {};
+        this.ctx = canvas.getContext("2d");
+        this.calibMin = options.calibMin ?? -20;
+        this.calibMax = options.calibMax ?? 20;
         this.consecutiveHits = 0;
         
-        this.resize(this.ctx.canvas.width, this.ctx.canvas.height);
+        this.resize(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
         this.resetBall();
         this.playerY = this.height / 2 - this.paddleH / 2;
         this.botY = this.height / 2 - this.paddleH / 2;
@@ -97,7 +99,7 @@ window.RehabGames['pingpong'] = class PingPongGame {
         this.api.updateCalibration(this.calibMin, this.calibMax);
     }
     
-    update(dt, currentAngle) {
+    update(currentAngle, dt) {
         // Запобігаємо стрибкам фізики при перемиканні вкладок браузера
         if (dt > 0.1) dt = 0.016;
 
@@ -225,8 +227,7 @@ window.RehabGames['pingpong'] = class PingPongGame {
         }
     }
     
-    draw() {
-        const ctx = this.ctx;
+    draw(ctx) {
         // Очищення фону
         ctx.fillStyle = '#0f172a';
         ctx.fillRect(0, 0, this.width, this.height);
