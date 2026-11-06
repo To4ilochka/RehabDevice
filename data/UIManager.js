@@ -289,6 +289,11 @@ export class UIManager {
         const gameContainer = document.getElementById("gameContainer");
         const gameInputMode = document.getElementById("gameInputMode");
         const btnTareGameInput = document.getElementById("btnTareGameInput");
+        const invertAngleToggle = document.getElementById("invertAngleToggle");
+
+        invertAngleToggle?.addEventListener("change", () => {
+            window.engineInstance?.setAxisInversion(invertAngleToggle.checked);
+        });
 
         gameInputMode?.addEventListener("change", () => {
             window.engineInstance?.setInputMode(gameInputMode.value);

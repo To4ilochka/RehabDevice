@@ -366,6 +366,70 @@ class DoctorDashboardTests(unittest.TestCase):
         self.assertTrue(vrdragon_result["scrollFits"])
         self.assertTrue(vrdragon_result["cleanedUp"])
 
+        axis_audit = self.page.evaluate("""() => {
+            const expectedModes = {
+                pingpong: {directions: 2, inputMode: '2way'},
+                balanceboard: {directions: 2, inputMode: '2way'},
+                cardodge: {directions: 2, inputMode: '2way'},
+                safecracker: {directions: 2, inputMode: '2way'},
+                balance3d: {directions: 4, inputMode: '4way'},
+                vrdragon: {directions: 4, inputMode: '4way'}
+            };
+            const metadataOk = Object.entries(expectedModes).every(([id, exp]) => {
+                const cls = window.RehabGames[id];
+                const req = cls && cls.inputRequirements;
+                return cls && req && req.directions === exp.directions && req.inputMode === exp.inputMode
+                    && cls.prototype.init.length === 2 && cls.prototype.update.length === 2 && cls.prototype.draw.length === 1;
+            });
+
+            // 2-way pitch immunity + tare check on pingpong
+            document.getElementById('gameContainer').style.display = 'flex';
+            state.updateMultiple({calibMin: -20, calibMax: 20});
+            engine.setTargetAngles(10, 0);
+            engine.startGame('pingpong');
+            const pong = engine.activeGame;
+            const centerPlayerY = pong.mapAngleToScreen(0);
+            engine.setTargetAngles(10, 45);
+            pong.update(10, 0.016, engine.input);
+            const yAfterPitchPos = pong.playerY;
+            pong.playerY = centerPlayerY;
+            engine.setTargetAngles(10, -45);
+            pong.update(10, 0.016, engine.input);
+            const yAfterPitchNeg = pong.playerY;
+            const pitchImmune = Math.abs(yAfterPitchPos - yAfterPitchNeg) < 1e-6
+                && Math.abs(yAfterPitchPos - centerPlayerY) < 1e-6;
+
+            // Runtime 4D -> 2D -> 4D mode toggle & axis inversion on vrdragon
+            engine.setTargetAngles(0, 0);
+            engine.startGame('vrdragon');
+            const dragon = engine.activeGame;
+            const selector = document.getElementById('gameInputMode');
+            selector.value = 'two-direction';
+            selector.dispatchEvent(new Event('change', {bubbles: true}));
+            engine.setTargetAngles(15, 25);
+            dragon.update(15, 0, engine.input);
+            const lockedVerticalIn2D = dragon.dragonTargetY === 0 && dragon.dragonTargetX > 0;
+            selector.value = 'four-direction';
+            selector.dispatchEvent(new Event('change', {bubbles: true}));
+            dragon.update(15, 0, engine.input);
+            const activeVerticalIn4D = dragon.dragonTargetY > 0 && dragon.dragonTargetX > 0;
+
+            // Axis inversion preserves tare zero and flips direction
+            engine.setTargetAngles(12, -8);
+            engine.tareInput();
+            engine.setAxisInversion(true);
+            const zeroAfterInvert = engine.input.getAxis('Horizontal') === 0 && engine.input.getAxis('Vertical') === 0;
+            engine.setAxisInversion(false);
+            engine.stopGame();
+
+            return {metadataOk, pitchImmune, lockedVerticalIn2D, activeVerticalIn4D, zeroAfterInvert};
+        }""")
+        self.assertTrue(axis_audit["metadataOk"])
+        self.assertTrue(axis_audit["pitchImmune"])
+        self.assertTrue(axis_audit["lockedVerticalIn2D"])
+        self.assertTrue(axis_audit["activeVerticalIn4D"])
+        self.assertTrue(axis_audit["zeroAfterInvert"])
+
 
     def assert_no_letter_stacking(self):
         """Every table cell must keep several characters per rendered line."""

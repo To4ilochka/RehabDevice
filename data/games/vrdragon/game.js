@@ -310,6 +310,7 @@ class VRDragonGame {
     update(currentAngle, dt) {
         if (!this.active) return;
         const input = arguments[2];
+        if (input?.mode) this.inputMode = input.mode;
         const safeDt = Number(dt);
         const step = Number.isFinite(safeDt) && safeDt >= 0 ? Math.min(0.1, safeDt) : 0;
         const safeAngle = Number(currentAngle);
@@ -331,7 +332,7 @@ class VRDragonGame {
 
         const axes = this._readInput(safeAngle, input);
         this.dragonTargetX = axes.x;
-        this.dragonTargetY = axes.y;
+        this.dragonTargetY = this.inputMode === "two-direction" ? 0 : axes.y;
 
         if (step === 0) {
             this.dragonX = this.dragonTargetX;
@@ -1160,9 +1161,9 @@ class VRDragonGame {
     }
 }
 
-VRDragonGame.inputRequirements = { directions: 4, mode: "4way" };
+VRDragonGame.inputRequirements = { directions: 4, inputMode: "4way", mode: "4way" };
 if (typeof window.RehabGames.register === "function") {
-    window.RehabGames.register("vrdragon", VRDragonGame, { directions: 4, mode: "4way" });
+    window.RehabGames.register("vrdragon", VRDragonGame, { directions: 4, inputMode: "4way", mode: "4way" });
 } else {
     window.RehabGames.vrdragon = VRDragonGame;
 }

@@ -92,6 +92,11 @@ window.RehabGames.safecracker = class SafeCrackerGame {
     update(angle, dt) {
         if (!this.active) return;
         dt = Number.isFinite(dt) ? Math.min(0.1, Math.max(0, dt)) : 0;
+        const input = arguments[2];
+        const tare = Number.isFinite(input?.rollTare) ? input.rollTare : 0;
+        if (Number.isFinite(angle) && tare !== 0) {
+            angle = ((angle - tare + 180) % 360 + 360) % 360 - 180;
+        }
         if (Number.isFinite(angle)) {
             if (this.lastAngle === null) {
                 const center = (this.calibMin + this.calibMax) / 2;
@@ -327,3 +332,9 @@ window.RehabGames.safecracker = class SafeCrackerGame {
         this._lastStateText = '';
     }
 };
+
+
+window.RehabGames.safecracker.inputRequirements = { directions: 2, inputMode: "2way" };
+if (typeof window.RehabGames.register === "function") {
+    window.RehabGames.register("safecracker", window.RehabGames.safecracker, { directions: 2, inputMode: "2way" });
+}

@@ -10,7 +10,12 @@ class Balance3DGame {
         this.particles = [];
     }
 
-    init(canvas) {
+    init(canvas, options) {
+        const opts = options || {};
+        this.inputMode = opts.inputMode || "four-direction";
+        this.calibMin = Number.isFinite(opts.calibMin) ? opts.calibMin : -20;
+        this.calibMax = Number.isFinite(opts.calibMax) ? opts.calibMax : 20;
+        if (this.calibMax <= this.calibMin) { this.calibMin = -20; this.calibMax = 20; }
         this.ctx = canvas.getContext("2d");
         const bounds = canvas.getBoundingClientRect();
         this.resize(bounds.width || canvas.clientWidth || 1, bounds.height || canvas.clientHeight || 1);
@@ -39,11 +44,13 @@ class Balance3DGame {
         this._updateHud("Час: 0,0 с", "Тримайте робота в центрі");
     }
 
-    update(angle, dt, input) {
+    update(angle, dt) {
+        const input = arguments[2];
+        if (input?.mode) this.inputMode = input.mode;
         if (!this.active) return;
         const step = Number.isFinite(dt) ? Math.min(0.05, Math.max(0, dt)) : 0;
-        const roll = this._axis(input, "Horizontal");
-        const pitch = this._axis(input, "Vertical");
+        const roll = input ? this._axis(input, "Horizontal") : (Number.isFinite(angle) ? Math.max(-1, Math.min(1, (angle - (this.calibMin + this.calibMax) / 2) / Math.max(1, (this.calibMax - this.calibMin) / 2))) : 0);
+        const pitch = this.inputMode === "two-direction" ? 0 : this._axis(input, "Vertical");
         const limit = this._boardRadius() * 0.78;
 
         this._updateParticles(step);
@@ -65,6 +72,10 @@ class Balance3DGame {
         this.velocityY += (Math.sin(this.tiltY) * gravity - this.robotY * restoringForce - this.velocityY * damping) * step;
         this.robotX += this.velocityX * step;
         this.robotY += this.velocityY * step;
+        if (this.inputMode === "two-direction") {
+            this.velocityY *= Math.max(0, 1 - step * 10);
+            this.robotY *= Math.max(0, 1 - step * 10);
+        }
 
         const danger = Math.max(Math.abs(this.robotX), Math.abs(this.robotY)) / limit;
         const state = danger < 0.35 ? "Тримайте робота в центрі" :
@@ -289,9 +300,9 @@ class Balance3DGame {
     }
 }
 
-Balance3DGame.inputRequirements = { directions: 4 };
+Balance3DGame.inputRequirements = { directions: 4, inputMode: "4way" };
 if (typeof window.RehabGames.register === "function") {
-    window.RehabGames.register("balance3d", Balance3DGame, { directions: 4 });
+    window.RehabGames.register("balance3d", Balance3DGame, { directions: 4, inputMode: "4way" });
 } else {
     window.RehabGames.balance3d = Balance3DGame;
 }

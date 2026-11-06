@@ -71,18 +71,26 @@ export class GameInput {
 export class GameEngine {
     constructor(stateManager) {
         this.stateManager = stateManager;
+        window.engineInstance = this;
         window.RehabGames = window.RehabGames || {};
-        if (typeof window.RehabGames.register !== "function") {
-            window.RehabGames.register = (gameId, GameClass, inputRequirements = GameClass.inputRequirements || { directions: 2 }) => {
-                GameClass.inputRequirements = inputRequirements;
-                window.RehabGames[gameId] = GameClass;
+        window.RehabGames.register = (gameId, GameClass, inputRequirements = GameClass.inputRequirements || { directions: 2, inputMode: "2way" }) => {
+            const directions = Number(inputRequirements?.directions) >= 4
+                || inputRequirements?.inputMode === "4way"
+                || inputRequirements?.mode === "4way" ? 4 : 2;
+            const normalizedReq = {
+                ...inputRequirements,
+                directions,
+                inputMode: directions >= 4 ? "4way" : "2way"
             };
-        }
+            GameClass.inputRequirements = normalizedReq;
+            window.RehabGames[gameId] = GameClass;
+        };
         
         this.currentAngle = 0;
         this.activeGame = null;
         this.input = new GameInput();
         this.userInputMode = this.stateManager.get('gameInputMode') || TWO_DIRECTION;
+        this.axisInverted = false;
         this.animationId = null;
         this.lastTime = 0;
         this.lastAngleSampleTime = null;
@@ -184,15 +192,46 @@ export class GameEngine {
         this.stateManager.updateMultiple({ targetAngle: this.input.roll, targetPitch: this.input.pitch });
     }
 
+    setAxisInversion(inverted) {
+        const nextInverted = Boolean(inverted);
+        if (nextInverted !== this.axisInverted) {
+            this.axisInverted = nextInverted;
+            this.input.roll = -this.input.roll || 0;
+            this.input.pitch = -this.input.pitch || 0;
+            this.input.rollTare = -this.input.rollTare || 0;
+            this.input.pitchTare = -this.input.pitchTare || 0;
+            this.stateManager.updateMultiple({
+                invertAxes: nextInverted,
+                targetAngle: this.input.roll,
+                targetPitch: this.input.pitch
+            });
+        }
+    }
+
     setInputMode(mode) {
-        this.userInputMode = mode === FOUR_DIRECTION ? FOUR_DIRECTION : TWO_DIRECTION;
-        this.applyInputMode();
+        const nextMode = mode === FOUR_DIRECTION ? FOUR_DIRECTION : TWO_DIRECTION;
+        this.userInputMode = nextMode;
+        if (this.activeGame) {
+            this.input.mode = nextMode;
+            this.activeGame.inputMode = nextMode;
+            this.stateManager.update('gameInputMode', nextMode);
+            const selector = document.getElementById("gameInputMode");
+            if (selector) selector.value = nextMode;
+        } else {
+            this.applyInputMode();
+        }
     }
 
     applyInputMode() {
         const requirements = this.activeGame?.inputRequirements || this.activeGame?.constructor?.inputRequirements || {};
-        const mode = requirements.directions >= 4 ? FOUR_DIRECTION : this.userInputMode;
+        const isFourWay = Number(requirements.directions) >= 4
+            || requirements.inputMode === "4way"
+            || requirements.mode === "4way";
+        const mode = isFourWay ? FOUR_DIRECTION : this.userInputMode;
         this.input.mode = mode;
+        if (this.activeGame) {
+            this.activeGame.inputMode = mode;
+        }
         this.stateManager.update('gameInputMode', mode);
         const selector = document.getElementById("gameInputMode");
         if (selector) selector.value = mode;
@@ -246,7 +285,7 @@ export class GameEngine {
 
             const { ctx, width, height } = this.resizeCanvas(canvas);
             
-            GameClass.inputRequirements = GameClass.inputRequirements || { directions: 2 };
+            GameClass.inputRequirements = GameClass.inputRequirements || { directions: 2, inputMode: "2way" };
             this.activeGame = new GameClass(ctx, this.api);
             this.applyInputMode();
             this.input.tare();
