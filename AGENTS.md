@@ -28,7 +28,7 @@ This file describes the checked-in ESP32 firmware, browser application, and supp
 | `data/StateManager.js` | Small observable state store. |
 | `data/NetworkService.js` | WebSocket lifecycle, HTTP polling fallback, command transport, and paginated MessagePack reads. |
 | `data/UIManager.js` | Patient controls, session table, patient search/summary, chart, status, and CSV export. |
-| `data/GameEngine.js`, `data/games/*/game.js` | Canvas animation loop and dynamically loaded Ping-Pong, BalanceBoard, and CarDodge games. |
+| `data/GameEngine.js`, `data/games/*/game.js` | Canvas animation loop, dual-axis `GameInput` pipeline, and dynamically loaded Ping-Pong, BalanceBoard, CarDodge, SafeCracker, Balance 3D, and VR Dragon games. |
 | `data/chart.js`, `data/msgpack.min.js` | Locally served vendor bundles: Chart.js 4.5.1 and MessagePack codec. Do not fetch these from a CDN at runtime. |
 | `compress_fs.py` | Rebuilds the compressed LittleFS staging tree for filesystem targets. |
 | `scripts/check_static_assets.py` | Compares staged files to source assets and optionally checks live HTTP headers and bodies. |
@@ -50,7 +50,7 @@ Use the module that owns a behavior. Keep firmware sensor acquisition, command d
 6. Initializes the MPU/DMP. Sensor failure is a warning; the program still creates queues/tasks, and `SensorMPU::update()` then returns without samples when DMP is not ready.
 7. Creates `mpuDataQueue` (100 `MPUData` items), `sysCommandQueue` (10 `SysCommandMsg` items), and `dbQueue` (10 `SessionRecord` items), then creates `SensorTask` and `DBTask` pinned to core 0, each with a 4096 stack argument.
 
-The web server is started before `sysCommandQueue` is created. If changing startup, ensure callbacks cannot enqueue commands before queue initialization. Task-creation and queue-creation return values are not currently checked; do not assume startup detects allocation failure.
+The web server is started before `sysCommandQueue` is created; `WebServerModule` command handlers check `sysCommandQueue != NULL` and drop early commands until queue initialization. Preserve that guard when changing startup or adding commands. Task-creation and queue-creation return values are not currently checked; do not assume startup detects allocation failure.
 
 ### Tasks, queues, and synchronization
 
@@ -64,9 +64,9 @@ The web server is started before `sysCommandQueue` is created. If changing start
 - `mpuDataQueue`: producer is `SensorTask`; consumer is `loop()`. A zero-wait send can fail when full, and the return value is ignored. Do not promise lossless acquisition without measuring queue pressure.
 - `sysCommandQueue`: producers are HTTP/WebSocket callbacks; consumer is `loop()`. Sends are zero-wait and their results are ignored. Handle queue-full behavior when adding commands.
 - `dbQueue`: producer is the loop on session stop; consumer is `DBTask`. `saveSession()` returns whether enqueueing succeeded, but the current loop ignores that result. A full queue can lose a completed session.
-- `SensorMPU` protects `currentData` with a mutex and counts failed lock attempts. `getData()` consumes `dataUpdated`; `peekData()` does not.
+- `SensorMPU` protects `currentData` with a mutex and atomically counts failed lock attempts. `getData()` consumes `dataUpdated`; `peekData()` does not. `recalibrate()` sets an atomic `recalibratePending` flag consumed by `SensorMPU::update()`, keeping post-boot `Wire` I2C access exclusively inside `SensorTask`.
 - `AnalyticsEngine` uses a recursive mutex because public methods call other locked methods. Keep its state behind those methods.
-- `DatabaseManager` has a mutex and exposes `stepStatement()`/`finalizeStatement()` for the chunked reader. Keep SQLite operations behind synchronized manager APIs. The current lock is per operation, not a transaction spanning an entire streamed response; audit any new `sqlite3_*` use, including column reads, against concurrent DBTask writes.
+- `DatabaseManager` has a mutex and exposes `stepSessionRow()`, `stepStatement()`, and `finalizeStatement()` for the chunked reader in `WebServerModule.cpp` so stepping and `sqlite3_column_*` reads run together under `dbMutex`. Keep SQLite operations behind synchronized manager APIs. The current lock is per operation, not a transaction spanning an entire streamed response; audit any new `sqlite3_*` use against concurrent DBTask writes.
 - Do not perform blocking device control or long work inside asynchronous callbacks. Keep loop-owned control routed through `sysCommandQueue`; keep potentially slow SQLite writes in `DBTask`.
 
 ### Sensor and analytics pipeline
@@ -114,13 +114,13 @@ The web server is started before `sysCommandQueue` is created. If changing start
 
 ### Browser application
 
-- `index.html` loads local Chart.js and MessagePack bundles, then `app.js` as an ES module. `app.js` wires StateManager, NetworkService, UIManager, and GameEngine; it applies the inversion checkbox to roll and pitch before passing telemetry to the engine.
+- `index.html` loads local Chart.js and MessagePack bundles, then `app.js` as an ES module. `app.js` wires StateManager, NetworkService, UIManager, and GameEngine (`window.engineInstance`); it applies `#invertAngleToggle` to incoming roll and pitch, while `UIManager.js` calls `GameEngine.setAxisInversion()` on toggle so stored angles and tare offsets flip together without a zero-origin jump.
 - WebSocket is attempted first. If it is not open after 8 seconds, or closes, the client uses `/api/status` polling every 250 ms and continues background reconnect attempts every 5 seconds (up to 10 attempts), then retries after a 75-second recovery timer. Session history is always fetched from the HTTP MessagePack endpoint in pages of 50.
 - The visualizer uses shortest-path angular interpolation for the circle. Games receive the target sensor angle directly from the animation loop. The engine's `requestAnimationFrame` loop continues after app initialization even when no game is active.
 - `UIManager` owns the dashboard DOM. The ALL view includes every loaded session; selecting a patient filters the same eight-column history table. The table intentionally scrolls horizontally inside its container on mobile and cells remain single-line. Keep document-level horizontal overflow out of responsive changes.
 - The dashboard validates a target norm in the inclusive 10..180 range and calculates recovery percentage. Historical chart amplitudes can exceed 180; the chart raises its Y maximum dynamically. Reject non-finite chart coordinates and preserve the empty/loading/error/no-results states.
 - CSV export is created in-browser from loaded sessions. Preserve Ukrainian column labels, text escaping, and existing session semantics.
-- Games are loaded from `/games/<id>/game.js` on first use and registered under `window.RehabGames`. New cartridges can use `window.RehabGames.register(id, GameClass, { directions: 2 | 4 })`; unannotated legacy cartridges default to 2-direction requirements, and 4-direction requirements automatically enable vertical input. `GameEngine` passes a normalized input reader as the optional third `update(angle, dt, input)` argument (`input.getAxis("Horizontal"|"Vertical")`), with taring on game start, a default 0.08 deadzone, and 30-degree sensitivity. The selector defaults to 2-direction mode; legacy cartridges using `update(angle, dt)` remain supported. Each game implements `init(canvas, options)`, `update(angle, dt)`, `draw(ctx)`, optional `resize(width, height)`, and `stop()`; `GameEngine` supplies CSS-pixel dimensions while scaling the canvas backing store for device pixel ratio.
+- Games are loaded from `/games/<id>/game.js` on first use (deduplicated per script load and guarded by `loadRequestId`) and registered via `window.RehabGames.register(id, GameClass, { directions: 2 | 4, inputMode: "2way" | "4way" })`: horizontal 2-way cartridges (`pingpong`, `balanceboard`, `cardodge`, `safecracker`) ignore pitch and apply `input.rollTare`, while 4-way cartridges (`balance3d`, `vrdragon`) auto-select `four-direction` on start and lock vertical motion to `0` if `#gameInputMode` is toggled to `two-direction` at runtime via `GameEngine.setInputMode()`. `GameEngine` passes `GameInput` as the optional third runtime argument to `update` (`input.getAxis("Horizontal"|"Vertical")`, tared on game start or `#btnTareGameInput`, default 0.08 deadzone, 30-degree sensitivity). Each cartridge receives `(ctx, api)` in its constructor and implements `init(canvas, options)`, `update(angle, dt)` (keep formal arity `2` and read `input` via `arguments[2]` or a default parameter, as verified in `test/test_doctor_dashboard.py`), `draw(ctx)`, optional `resize(width, height)`, and `stop()` (cleaning up timers/listeners and transient state); `GameEngine` supplies CSS-pixel dimensions while scaling the canvas backing store up to 2x `devicePixelRatio`.
 - UI strings and exported reports are Ukrainian. The release checker requires external Internet access to GitHub; local monitoring, API, and static assets are served by the device.
 
 ## Hardware, Flash, And Configuration
@@ -229,7 +229,7 @@ Run the doctor dashboard suite:
 python -m unittest discover -s test -p test_doctor_dashboard.py -v
 ```
 
-It serves `data/` from a local threaded HTTP server, runs Chromium and WebKit, exercises mocked/synthetic sessions and network responses, and checks 320, 390, 430, 768, and 1280 CSS-pixel layouts. It covers session states, pagination, CSV/delete interactions, norm validation, chart points including historical amplitudes, mobile table overflow, focus visibility, and touch targets. Screenshots go to `.pio/dashboard-checks/`. The suite does not contact the ESP32, verify the flashed filesystem, or establish physical iPhone Safari behavior. Wait for explicit DOM/layout assertions; do not wait for `networkidle` because polling and reconnect timers are intentional.
+It serves `data/` from a local threaded HTTP server, runs Chromium and WebKit, exercises mocked/synthetic sessions and network responses, and checks 320, 390, 430, 768, and 1280 CSS-pixel layouts. It covers session states, pagination, CSV/delete interactions, norm validation, chart points including historical amplitudes, mobile table overflow, focus visibility, touch targets, dual-axis WebSocket/HTTP telemetry, `GameInput` normalization/tare/inversion/mode toggling, and lifecycle/DPR checks across all six games in `data/games/*/game.js`. Screenshots go to `.pio/dashboard-checks/`. The suite does not contact the ESP32, verify the flashed filesystem, or establish physical iPhone Safari behavior. Wait for explicit DOM/layout assertions; do not wait for `networkidle` because polling and reconnect timers are intentional.
 
 Run angle wrap compile-time assertions with the installed ESP32 compiler:
 
