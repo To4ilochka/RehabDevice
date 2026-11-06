@@ -316,6 +316,56 @@ class DoctorDashboardTests(unittest.TestCase):
             self.assertTrue(game_check, f"{game_id} failed non-finite input or viewport check")
             self.page.evaluate("engine.stopGame()")
 
+        self.page.evaluate("""() => {
+            document.getElementById('gameContainer').style.display = 'flex';
+            engine.setTargetAngles(0, 0);
+            engine.startGame('vrdragon');
+        }""")
+        self.page.wait_for_function(
+            "engine.activeGame && engine.activeGame.constructor.name === 'VRDragonGame'"
+        )
+        vrdragon_result = self.page.evaluate("""() => {
+            const game = engine.activeGame;
+            const canvas = document.getElementById('mainGameCanvas');
+            const ctx = canvas.getContext('2d');
+            engine.setTargetAngles(18, -15);
+            game.update(18, 0.1, engine.input);
+            game.update(NaN, NaN, engine.input);
+            game.update(Infinity, -1, engine.input);
+            game.draw(ctx);
+            const leftPixel = ctx.getImageData(
+                Math.floor(canvas.width * 0.25), Math.floor(canvas.height * 0.5), 1, 1).data;
+            const rightPixel = ctx.getImageData(
+                Math.floor(canvas.width * 0.75), Math.floor(canvas.height * 0.5), 1, 1).data;
+            const hudScore = document.getElementById('hudScore').textContent;
+            const hudState = document.getElementById('hudBotState').textContent;
+            const modeValue = document.getElementById('gameInputMode').value;
+            const hasOption = !!document.querySelector('#gameSelect option[value="vrdragon"]');
+            const movedX = game.dragonX > 0 && Number.isFinite(game.dragonX);
+            const movedY = game.dragonY < 0 && Number.isFinite(game.dragonY);
+            const signatures = [game.init.length, game.update.length, game.draw.length];
+            const scrollFits = document.documentElement.scrollWidth <= innerWidth;
+            engine.stopGame();
+            const cleanedUp = !game.active && game._orientHandler === null
+                && game.particles.length === 0 && game.mountains.length === 0;
+            return {
+                signatures, modeValue, hasOption, movedX, movedY,
+                stereoRendered: leftPixel[3] > 0 && rightPixel[3] > 0,
+                hudScore, hudState, scrollFits, cleanedUp
+            };
+        }""")
+        self.assertEqual(vrdragon_result["signatures"], [2, 2, 1])
+        self.assertEqual(vrdragon_result["modeValue"], "four-direction")
+        self.assertTrue(vrdragon_result["hasOption"])
+        self.assertTrue(vrdragon_result["movedX"])
+        self.assertTrue(vrdragon_result["movedY"])
+        self.assertTrue(vrdragon_result["stereoRendered"])
+        self.assertIn("Очки:", vrdragon_result["hudScore"])
+        self.assertIn("Кристали:", vrdragon_result["hudScore"])
+        self.assertIn("Дистанція:", vrdragon_result["hudState"])
+        self.assertTrue(vrdragon_result["scrollFits"])
+        self.assertTrue(vrdragon_result["cleanedUp"])
+
 
     def assert_no_letter_stacking(self):
         """Every table cell must keep several characters per rendered line."""
