@@ -109,11 +109,15 @@ window.RehabGames['pingpong'] = class PingPongGame {
         // Запобігаємо стрибкам фізики при перемиканні вкладок браузера
         if (!Number.isFinite(dt) || dt < 0 || dt > 0.1) dt = 0.016;
 
-        const safeAngle = Number.isFinite(currentAngle) ? currentAngle : (this.calibMin + this.calibMax) / 2;
+        const input = arguments[2];
+        const tare = Number.isFinite(input?.rollTare) ? input.rollTare : 0;
+        const hasAngle = Number.isFinite(currentAngle) || Number.isFinite(input?.roll);
+        const rawAngle = Number.isFinite(currentAngle) ? currentAngle : (Number.isFinite(input?.roll) ? input.roll : (this.calibMin + this.calibMax) / 2);
+        const safeAngle = hasAngle && tare !== 0 ? (((rawAngle - tare + 180) % 360 + 360) % 360 - 180) : rawAngle;
         let boundsChanged = false;
         if (Number.isFinite(currentAngle)) {
-            if (currentAngle > this.calibMax) { this.calibMax += (currentAngle - this.calibMax) * 0.05; boundsChanged = true; }
-            if (currentAngle < this.calibMin) { this.calibMin -= (this.calibMin - currentAngle) * 0.05; boundsChanged = true; }
+            if (safeAngle > this.calibMax) { this.calibMax += (safeAngle - this.calibMax) * 0.05; boundsChanged = true; }
+            if (safeAngle < this.calibMin) { this.calibMin -= (this.calibMin - safeAngle) * 0.05; boundsChanged = true; }
         }
         if (boundsChanged) {
             this.syncCalibration();
@@ -287,3 +291,9 @@ window.RehabGames['pingpong'] = class PingPongGame {
         this.currentBallSpeed = 0;
     }
 };
+
+
+window.RehabGames['pingpong'].inputRequirements = { directions: 2, inputMode: "2way" };
+if (typeof window.RehabGames.register === "function") {
+    window.RehabGames.register("pingpong", window.RehabGames['pingpong'], { directions: 2, inputMode: "2way" });
+}
