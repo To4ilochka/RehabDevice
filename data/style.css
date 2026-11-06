@@ -23,6 +23,10 @@
     padding: 0;
 }
 
+[hidden] {
+    display: none !important;
+}
+
 html {
     background-color: var(--bg-main);
     color: var(--text-primary);
@@ -264,9 +268,11 @@ main {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    min-width: 0;
 }
 
-.input-group label {
+.input-group label,
+.group-caption {
     font-size: 0.85rem;
     font-weight: 600;
     color: var(--text-secondary);
@@ -328,7 +334,7 @@ main {
     box-shadow: 0 4px 16px rgba(255, 23, 68, 0.25);
 }
 
-/* Circle Visualizer (Guest & Patient) */
+/* Circle & 2D Balance Visualizer (Guest & Patient) */
 .visualizer-container {
     display: flex;
     flex-direction: column;
@@ -356,7 +362,8 @@ main {
     box-shadow: inset 0 0 30px rgba(0, 242, 254, 0.05);
 }
 
-.circle-indicator {
+.circle-indicator,
+.balance-visualizer {
     position: absolute;
     width: 220px;
     height: 220px;
@@ -366,6 +373,67 @@ main {
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+.balance-visualizer {
+    overflow: hidden;
+    background: radial-gradient(circle at center, rgba(0, 242, 254, 0.08) 0%, rgba(10, 14, 23, 0.55) 80%);
+}
+
+.balance-ring-inner {
+    position: absolute;
+    width: 52%;
+    height: 52%;
+    border-radius: 50%;
+    border: 1.5px dashed rgba(0, 230, 118, 0.45);
+    pointer-events: none;
+}
+
+.balance-axis-tag {
+    position: absolute;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.68);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+}
+
+.balance-axis-tag.top {
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.balance-axis-tag.bottom {
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.balance-axis-tag.left {
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.balance-axis-tag.right {
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.balance-puck {
+    position: absolute;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #fff8e1 0%, #ff9100 55%, #e65100 100%);
+    border: 2px solid #ffffff;
+    box-shadow: 0 0 16px rgba(255, 145, 0, 0.9);
+    z-index: 3;
+    pointer-events: none;
+    will-change: transform;
 }
 
 .circle-arrow {
@@ -401,6 +469,7 @@ main {
 .angle-display {
     text-align: center;
     z-index: 2;
+    width: 100%;
 }
 
 .angle-value {
@@ -415,6 +484,40 @@ main {
     font-size: 1rem;
     color: var(--text-secondary);
     font-weight: 600;
+}
+
+.dual-angle-readout {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.65rem;
+    width: 100%;
+}
+
+.dual-angle-pill {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 0.55rem 0.85rem;
+    min-width: 118px;
+    flex: 1 1 118px;
+    max-width: 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+.dual-angle-label {
+    font-size: 0.74rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.dual-angle-num {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: var(--accent-primary);
 }
 
 /* Live Analytics Grid */
@@ -547,7 +650,7 @@ tr:hover td {
    ============================================================================ */
 @media (max-width: 968px) {
     .grid-2 {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
@@ -607,7 +710,8 @@ tr:hover td {
         height: 230px;
     }
 
-    .circle-indicator {
+    .circle-indicator,
+    .balance-visualizer {
         width: 190px;
         height: 190px;
     }
@@ -776,20 +880,25 @@ tr:hover td {
 .text-muted { color: var(--text-muted); }
 .text-success { color: var(--accent-green); }
 .text-warning { color: var(--accent-orange); }
+.cursor-pointer { cursor: pointer; }
 
 /* --- Component Classes --- */
 .info-note { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; }
 .active-patient-badge { padding: 1rem; background: rgba(0, 230, 118, 0.1); border: 1px solid rgba(0, 230, 118, 0.3); border-radius: 12px; }
 .active-patient-title { font-size: 1.25rem; color: var(--accent-green); margin-top: 0.25rem; }
-.select-dark { flex: 1; min-width: 0; padding: 0.5rem; color: #ffffff; background-color: #1e293b; -webkit-appearance: none; appearance: none; }
+.select-dark { flex: 1; min-width: 0; max-width: 100%; padding: 0.65rem 0.75rem; color: #ffffff; background-color: #1e293b; -webkit-appearance: none; appearance: none; }
 #authActivePanel .game-input-controls { min-width: 0; }
-#gameInputMode { min-width: 0; }
+#gameInputMode, #gameSelect { min-width: 0; width: 100%; }
+.game-launch-row { align-items: stretch; min-width: 0; flex-wrap: wrap; }
+.game-launch-row #gameSelect { flex: 1 1 10.5rem; }
+.game-launch-row #btnModeGame { flex: 0 0 auto; min-height: 44px; }
 .btn-gradient-primary { background: linear-gradient(135deg, #ff007a, #7928ca); color: white; border: none; font-weight: 600; box-shadow: 0 4px 15px rgba(255, 0, 122, 0.4); padding: 0.5rem 1rem; }
 .btn-success { background: #00e676; color: #000; font-weight: bold; }
 .divider { border: 0; border-top: 1px solid var(--border-color); margin: 0.5rem 0; }
 .divider-lg { border: 0; border-top: 1px solid var(--border-color); margin: 2rem 0; }
-.setting-row { display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.05); padding: 0.8rem; border-radius: 8px; }
-.toggle-checkbox { transform: scale(1.5); cursor: pointer; accent-color: #00f2fe; }
+.setting-row { display: flex; flex-direction: row; justify-content: space-between; align-items: center; gap: 0.75rem; background: rgba(255,255,255,0.05); padding: 0.8rem; border-radius: 8px; min-width: 0; }
+.setting-row label { flex: 1; min-width: 0; }
+.toggle-checkbox { width: 22px; height: 22px; flex-shrink: 0; cursor: pointer; accent-color: #00f2fe; }
 .search-input { width: 220px; padding: 0.55rem 0.9rem; font-size: 0.88rem; }
 .btn-sm { padding: 0.55rem 1rem; font-size: 0.88rem; }
 .summary-subtitle { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); font-weight: 600; }
@@ -848,7 +957,7 @@ main {
 }
 #tabDoctor .btn { min-width: 44px; white-space: normal; }
 #tabDoctor .input-field { font-size: 1rem; }
-#tabDoctor button:focus-visible, #tabDoctor input:focus-visible, .tab-btn:focus-visible {
+button:focus-visible, input:focus-visible, select:focus-visible, .tab-btn:focus-visible {
     outline: 2px solid var(--accent-primary);
     outline-offset: 3px;
 }
@@ -925,7 +1034,10 @@ main {
 
 /* Game overlays */
 .game-overlay { position: fixed; inset: 0; z-index: 9999; background: #000; flex-direction: column; }
-.game-overlay-header { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: space-between; align-items: center; padding: 10px 20px; background: #0f172a; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.game-overlay-header { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: space-between; align-items: center; padding: 10px 16px; background: #0f172a; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.game-overlay-title { font-weight: 700; color: #00f2fe; font-size: 0.95rem; }
+.game-overlay-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.btn-game-action { padding: 6px 12px; font-size: 0.85rem; min-height: 38px; }
 .game-engine-wrapper { flex: 1; position: relative; overflow: hidden; }
 .game-hud { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; box-sizing: border-box; flex-wrap: wrap; gap: 0.5rem; justify-content: space-between; color: rgba(255,255,255,0.8); font-size: 14px; font-weight: 600; pointer-events: none; z-index: 5; }
 .custom-game-ui { position: absolute; inset: 0; z-index: 6; pointer-events: none; }

@@ -19,6 +19,7 @@ struct MPUData {
     float accelY;
     float accelZ;
     bool dataUpdated;
+    bool recalibrated;
     unsigned long timestamp;
 };
 
@@ -47,11 +48,11 @@ private:
 
     Quaternion q;
     VectorFloat gravity;
-    float ypr[3];
 
     float pitchOffset;
     float rollOffset;
     float yawOffset;
+    float gravRefMatrix[9];
 
     MPUData currentData;
     SemaphoreHandle_t dataMutex;   // Protects currentData across cores
@@ -61,6 +62,11 @@ private:
     CalibrationState calState;
     uint32_t calWaitStartTime;
     bool recalibratePending;
+    bool recalibratedPendingSample;
+
+    void setIdentityGravityRef();
+    void updateGravityRefFromVector(float gx, float gy, float gz);
+    void computeCalibratedTilt(const VectorFloat& rawGrav, float& outPitchDeg, float& outRollDeg) const;
 };
 
 #endif // SENSOR_MPU_H

@@ -83,9 +83,12 @@ void AnalyticsEngine::processData(const MPUData& data) {
     }
     lastUpdateMs = nowMs;
 
-    // Use wrist roll angle as primary movement metric
-    currentAngle = speedSamplesCount == 0 ? data.roll
-        : currentAngle + normalizeAngleDifference(data.roll - previousRoll);
+    // Use wrist roll angle as primary movement metric; skip step delta when zero-offset was just recalibrated
+    if (speedSamplesCount == 0) {
+        currentAngle = data.roll;
+    } else if (!data.recalibrated) {
+        currentAngle += normalizeAngleDifference(data.roll - previousRoll);
+    }
     previousRoll = data.roll;
 
     // Update session global minimum and maximum

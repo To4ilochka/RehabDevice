@@ -5,12 +5,20 @@ export class UIManager {
         this.doctorChart = null;
         this.selectedDoctorPatient = "ALL";
         this.doctorSearchQuery = "";
+        this.allGameOptions = [];
+        this.selectedGameByMode = {
+            "two-direction": "pingpong",
+            "four-direction": "balance3d"
+        };
     }
 
     init() {
+        this.captureGameOptionsCatalog();
         this.initChart();
         this.setupTabNavigation();
         this.setupEventListeners();
+        this.syncInputModeUI(this.stateManager.get('gameInputMode') || 'two-direction');
+
         const header = document.querySelector("header");
         if (header && typeof ResizeObserver !== "undefined") {
             this.headerObserver = new ResizeObserver(() => {
@@ -56,14 +64,130 @@ export class UIManager {
         this.stateManager.subscribe('memoryUsage', (mem) => this.updateMemory(mem));
         
         this.stateManager.subscribe('targetAngle', (angle) => {
+            const formatted = Number.isFinite(angle) ? angle.toFixed(1) : "0.0";
             const valElem = document.getElementById("angleValueElem");
-            if (valElem) valElem.textContent = angle.toFixed(1);
+            if (valElem) valElem.textContent = formatted;
+            const rollElem = document.getElementById("rollValueElem");
+            if (rollElem) rollElem.textContent = formatted;
+        });
+
+        this.stateManager.subscribe('targetPitch', (pitch) => {
+            const formatted = Number.isFinite(pitch) ? pitch.toFixed(1) : "0.0";
+            const pitchElem = document.getElementById("pitchValueElem");
+            if (pitchElem) pitchElem.textContent = formatted;
+        });
+
+        this.stateManager.subscribe('gameInputMode', (mode) => {
+            this.syncInputModeUI(mode);
+        });
+
+        this.stateManager.subscribe('invertAxes', (inverted) => {
+            const el = document.getElementById("invertAngleToggle");
+            if (el) el.checked = Boolean(inverted);
+        });
+
+        this.stateManager.subscribe('invertPitch', (inverted) => {
+            const el = document.getElementById("invertPitchToggle");
+            if (el) el.checked = Boolean(inverted);
+        });
+
+        this.stateManager.subscribe('swapAxes', (swapped) => {
+            const el = document.getElementById("swapAxesToggle");
+            if (el) el.checked = Boolean(swapped);
         });
         
         this.stateManager.subscribe('currentPatientName', (name) => {
             const el = document.getElementById("activePatientName");
             if (el) el.textContent = name;
         });
+    }
+
+    captureGameOptionsCatalog() {
+        const gameSelect = document.getElementById("gameSelect");
+        if (!gameSelect) return;
+        const parsed = [...gameSelect.options].map(opt => ({
+            value: opt.value,
+            label: opt.textContent,
+            directions: Number(opt.dataset.directions) >= 4 ? 4 : 2,
+            style: opt.getAttribute("style") || "color: #ffffff;"
+        }));
+        if (parsed.length > 0) {
+            this.allGameOptions = parsed;
+        }
+    }
+
+    syncInputModeUI(mode) {
+        const normalizedMode = mode === "four-direction" ? "four-direction" : "two-direction";
+        const isFourWay = normalizedMode === "four-direction";
+        const targetDirections = isFourWay ? 4 : 2;
+
+        const modeSelect = document.getElementById("gameInputMode");
+        if (modeSelect && modeSelect.value !== normalizedMode) {
+            modeSelect.value = normalizedMode;
+        }
+
+        const gameSelect = document.getElementById("gameSelect");
+        if (gameSelect && this.allGameOptions.length > 0) {
+            const currentOption = this.allGameOptions.find(opt => opt.value === gameSelect.value);
+            if (currentOption) {
+                const prevKey = currentOption.directions >= 4 ? "four-direction" : "two-direction";
+                this.selectedGameByMode[prevKey] = currentOption.value;
+            }
+
+            const allowedOptions = this.allGameOptions.filter(opt => opt.directions === targetDirections);
+            const preferredValue = this.selectedGameByMode[normalizedMode];
+            const nextValue = allowedOptions.some(opt => opt.value === preferredValue)
+                ? preferredValue
+                : (allowedOptions[0]?.value || "");
+
+            gameSelect.innerHTML = "";
+            allowedOptions.forEach(item => {
+                const opt = document.createElement("option");
+                opt.value = item.value;
+                opt.dataset.directions = String(item.directions);
+                opt.setAttribute("style", item.style);
+                opt.textContent = item.label;
+                if (item.value === nextValue) {
+                    opt.selected = true;
+                }
+                gameSelect.appendChild(opt);
+            });
+            if (nextValue) {
+                gameSelect.value = nextValue;
+                this.selectedGameByMode[normalizedMode] = nextValue;
+            }
+        }
+
+        const gameSelectLabel = document.getElementById("gameSelectLabel");
+        if (gameSelectLabel) {
+            gameSelectLabel.textContent = isFourWay
+                ? "2. Оберіть гру (4 напрямки)"
+                : "2. Оберіть гру (2 напрямки)";
+        }
+
+        const fourWayOrientation = document.getElementById("fourWayOrientationControls");
+        if (fourWayOrientation) {
+            fourWayOrientation.hidden = !isFourWay;
+        }
+
+        const visualizerTitle = document.getElementById("visualizerTitle");
+        if (visualizerTitle) {
+            visualizerTitle.textContent = isFourWay
+                ? "🧭 Візуалізація нахилу баланс-дошки (360°)"
+                : "🔄 Динамічна візуалізація кута кисті";
+        }
+
+        const circleIndicator = document.getElementById("circleIndicator");
+        if (circleIndicator) circleIndicator.hidden = isFourWay;
+
+        const balanceBoardVisualizer = document.getElementById("balanceBoardVisualizer");
+        if (balanceBoardVisualizer) balanceBoardVisualizer.hidden = !isFourWay;
+
+        const singleReadout = document.getElementById("singleAngleReadout");
+        if (singleReadout) singleReadout.hidden = isFourWay;
+
+        const dualReadout = document.getElementById("dualAngleReadout");
+        if (dualReadout) dualReadout.hidden = !isFourWay;
     }
 
     updateConnectionStatus(isConnected, isHttpFallback) {
@@ -217,9 +341,15 @@ export class UIManager {
         if (btnRecalibrate) {
             btnRecalibrate.addEventListener("click", () => {
                 this.networkService.sendCommand("recalibrate");
-                const originalText = btnRecalibrate.textContent;
-                btnRecalibrate.textContent = "Калібрується...";
-                setTimeout(() => { btnRecalibrate.textContent = originalText; }, 1200);
+                window.engineInstance?.resetTare();
+                if (!btnRecalibrate.dataset.originalLabel) {
+                    btnRecalibrate.dataset.originalLabel = btnRecalibrate.textContent;
+                }
+                btnRecalibrate.textContent = "⏳ Калібрується 0°...";
+                clearTimeout(this._recalTimer);
+                this._recalTimer = setTimeout(() => {
+                    btnRecalibrate.textContent = btnRecalibrate.dataset.originalLabel;
+                }, 1200);
             });
         }
 
@@ -288,28 +418,59 @@ export class UIManager {
         const btnExitGame = document.getElementById("btnExitGame");
         const gameContainer = document.getElementById("gameContainer");
         const gameInputMode = document.getElementById("gameInputMode");
+        const gameSelect = document.getElementById("gameSelect");
         const btnTareGameInput = document.getElementById("btnTareGameInput");
         const invertAngleToggle = document.getElementById("invertAngleToggle");
+        const invertPitchToggle = document.getElementById("invertPitchToggle");
+        const swapAxesToggle = document.getElementById("swapAxesToggle");
 
-        invertAngleToggle?.addEventListener("change", () => {
-            window.engineInstance?.setAxisInversion(invertAngleToggle.checked);
+        const syncOrientationFromDOM = () => {
+            window.engineInstance?.setAxisOrientation({
+                invertX: Boolean(invertAngleToggle?.checked),
+                invertY: Boolean(invertPitchToggle?.checked),
+                swapAxes: Boolean(swapAxesToggle?.checked)
+            });
+        };
+
+        invertAngleToggle?.addEventListener("change", syncOrientationFromDOM);
+        invertPitchToggle?.addEventListener("change", syncOrientationFromDOM);
+        swapAxesToggle?.addEventListener("change", syncOrientationFromDOM);
+
+        gameSelect?.addEventListener("change", () => {
+            const currentMode = this.stateManager.get('gameInputMode') === 'four-direction'
+                ? 'four-direction'
+                : 'two-direction';
+            if (gameSelect.value) {
+                this.selectedGameByMode[currentMode] = gameSelect.value;
+            }
         });
 
         gameInputMode?.addEventListener("change", () => {
-            window.engineInstance?.setInputMode(gameInputMode.value);
+            if (window.engineInstance) {
+                window.engineInstance.setInputMode(gameInputMode.value);
+            } else {
+                this.stateManager.update('gameInputMode', gameInputMode.value);
+            }
         });
 
         btnTareGameInput?.addEventListener("click", () => {
             window.engineInstance?.tareInput();
+            if (!btnTareGameInput.dataset.originalLabel) {
+                btnTareGameInput.dataset.originalLabel = btnTareGameInput.textContent;
+            }
+            btnTareGameInput.textContent = "✅ 0° Відцентровано";
+            clearTimeout(this._tareTimer);
+            this._tareTimer = setTimeout(() => {
+                btnTareGameInput.textContent = btnTareGameInput.dataset.originalLabel;
+            }, 900);
         });
 
         if (btnModeGame) {
             btnModeGame.addEventListener("click", () => {
                 this.stateManager.update('currentAppMode', 'game');
                 if (gameContainer) gameContainer.style.display = "flex";
-                const gameSelect = document.getElementById("gameSelect");
                 const engine = window.engineInstance;
-                if (gameSelect && engine) {
+                if (gameSelect && engine && gameSelect.value) {
                     engine.startGame(gameSelect.value);
                 }
             });
