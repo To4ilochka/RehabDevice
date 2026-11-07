@@ -49,6 +49,12 @@ public:
     // Check if SD is currently being used
     bool isSDAvailable() const { return usingSD; }
 
+    // Cached LittleFS storage telemetry & 100 KiB safety reserve check (O(1), lock-free)
+    uint32_t getUsedBytes() const;
+    uint32_t getTotalBytes() const;
+    bool isStorageLowSpace() const;
+    void refreshStorageStats();
+
     // Close database gracefully
     void close();
 
@@ -58,6 +64,10 @@ private:
     const char* dbPathSD;
     const char* dbPathFS;
 
+    uint32_t cachedUsedBytes;
+    uint32_t cachedTotalBytes;
+    bool cachedLowSpace;
+
     // Serializes all sqlite3 API calls on `db`: the connection is shared between
     // dbTask (writes) and AsyncWebServer request handlers (reads), which run in
     // different FreeRTOS tasks/cores.
@@ -65,11 +75,13 @@ private:
 
     // Helper to execute a query without results
     bool execQuery(const char* sql);
+    bool hasColumn(sqlite3* handle, const char* schemaName, const char* columnName);
+    bool ensureSchemaColumns(sqlite3* handle, const char* schemaName);
     
     // Attempt to merge from FS to SD if needed
     bool mergeAndCleanupLittleFS();
     
-    // Ensure table exists
+    // Ensure table exists and has all required columns
     bool createTables();
 };
 
