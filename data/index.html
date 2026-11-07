@@ -52,12 +52,21 @@
                         <div class="card-title">🔐 Авторизація Сесії</div>
                     </div>
 
-                    <!-- Sensor Motion Mode (available with or without active session) -->
+                    <!-- Sensor Motion Mode (available before session; locked while active) -->
                     <div class="input-group game-input-controls">
                         <label for="gameInputMode">Режим рухів датчика</label>
                         <select id="gameInputMode" class="input-field select-dark">
                             <option value="two-direction" selected>↔ 2 напрямки (вліво / вправо)</option>
                             <option value="four-direction">↕ 4 напрямки (баланс-дошка 360°)</option>
+                        </select>
+                    </div>
+
+                    <!-- 4-Way Clinical Sub-Protocol Selector (shown when 4-direction mode is selected) -->
+                    <div class="input-group game-input-controls" id="fourWayProtocolGroup" hidden>
+                        <label for="balanceProtocolSelect">Клінічний протокол балансу</label>
+                        <select id="balanceProtocolSelect" class="input-field select-dark">
+                            <option value="dynamic" selected>🎮 Динамічний баланс (Ігри / 4 напрямки)</option>
+                            <option value="static">🎯 Статичне утримання (Центр 0°)</option>
                         </select>
                     </div>
 
@@ -80,8 +89,13 @@
                             <h3 id="activePatientName" class="active-patient-title">Пацієнт</h3>
                         </div>
 
+                        <!-- Static Balance Hold Guidance (shown when Static 4-Way protocol is active) -->
+                        <p id="staticHoldActiveHint" class="info-note static-hold-banner" hidden>
+                            🎯 Статичне утримання рівноваги: тримайте індикатор у межах зеленого цільового кола (≤ 5°). Ігровий запуск вимкнено для чистоти клінічного протоколу.
+                        </p>
+
                         <!-- Filtered Game Launch Dropdown -->
-                        <div class="input-group">
+                        <div class="input-group" id="activeGameLaunchGroup">
                             <label for="gameSelect" id="gameSelectLabel">Оберіть гру (2 напрямки)</label>
                             <div class="flex-row gap-s game-launch-row">
                                 <select id="gameSelect" class="input-field select-dark">
@@ -202,27 +216,27 @@
                 </div>
                 <div class="metrics-grid">
                     <div class="metric-box">
-                        <span class="metric-title">Мін / Макс Кут</span>
-                        <span class="metric-val"><span id="statMin">0.0°</span> / <span id="statMax">0.0°</span></span>
+                        <span class="metric-title" id="statTitle1">Мін / Макс Кут</span>
+                        <span class="metric-val" id="statBoxVal1"><span id="statMin">0.0°</span><span id="statSep"> / </span><span id="statMax">0.0°</span></span>
                     </div>
                     <div class="metric-box highlight">
-                        <span class="metric-title">Амплітуда руху</span>
+                        <span class="metric-title" id="statTitle2">Амплітуда руху</span>
                         <span class="metric-val" id="statAmp">0.0°</span>
                     </div>
                     <div class="metric-box">
-                        <span class="metric-title">Сер. швидкість</span>
+                        <span class="metric-title" id="statTitle3">Сер. швидкість</span>
                         <span class="metric-val" id="statSpeed">0.0°/с</span>
                     </div>
                     <div class="metric-box highlight">
-                        <span class="metric-title">Індекс плавності (тремор)</span>
+                        <span class="metric-title" id="statTitle4">Індекс плавності (тремор)</span>
                         <span class="metric-val text-success" id="statSmooth">100%</span>
                     </div>
                     <div class="metric-box highlight">
-                        <span class="metric-title">Згинання / Повороти</span>
+                        <span class="metric-title" id="statTitle5">Згинання / Повороти</span>
                         <span class="metric-val text-warning" id="statFlex">0</span>
                     </div>
                     <div class="metric-box">
-                        <span class="metric-title">Тривалість сесії</span>
+                        <span class="metric-title" id="statTitle6">Тривалість сесії</span>
                         <span class="metric-val" id="statDuration">0.0 с</span>
                     </div>
                 </div>
@@ -235,7 +249,7 @@
                 <div class="card-header flex-wrap gap-m">
                     <div class="card-title">🩺 Аналітичний дашборд та клінічна динаміка</div>
                     <div class="flex-row-center flex-wrap gap-s doctor-search-controls">
-                        <input type="text" id="patientSearchInput" class="input-field search-input" aria-label="Пошук пацієнта" placeholder="🔍 Точне ПІБ пацієнта...">
+                        <input type="text" id="patientSearchInput" class="input-field search-input" aria-label="Пошук пацієнта" placeholder="🔍 Точне ПІБ пацієнта..." autocorrect="off" autocapitalize="off" spellcheck="false">
                         <button class="btn btn-secondary btn-sm" id="btnExactSearch" title="Точний пошук пацієнта">Знайти</button>
                         <button class="btn btn-sm" id="btnDownloadCSV" title="Завантажити CSV таблицю">
                             📥 Завантажити CSV (Всі)
@@ -246,6 +260,13 @@
                 <!-- Interactive patient selection pills instead of dropdown -->
                 <div id="patientPillsContainer" class="patient-pills-strip">
                     <button class="patient-pill active" data-patient="ALL">🧑 Всі пацієнти</button>
+                </div>
+
+                <!-- 3-Protocol Segmented Filter -->
+                <div id="doctorProtocolSwitch" class="protocol-switch-strip" role="group" aria-label="Фільтр клінічного протоколу" hidden>
+                    <button type="button" class="protocol-pill active" data-protocol="0" aria-pressed="true">↔ Кисть (0)</button>
+                    <button type="button" class="protocol-pill" data-protocol="1" aria-pressed="false">🎯 Баланс: Статика (0)</button>
+                    <button type="button" class="protocol-pill" data-protocol="2" aria-pressed="false">🎮 Баланс: Динаміка (0)</button>
                 </div>
 
                 <!-- Clinical course summary for selected patient -->
@@ -262,7 +283,7 @@
                 <div id="patientSummaryContainer" class="patient-summary-box" hidden>
                     <div class="summary-header">
                         <div>
-                            <span class="summary-subtitle">Резюме курсу реабілітації</span>
+                            <span class="summary-subtitle" id="summaryCourseSubtitle">Резюме курсу реабілітації</span>
                             <h3 id="summaryPatientName" class="summary-title">Пацієнт</h3>
                         </div>
                         <div class="flex-row-center flex-wrap gap-m">
@@ -281,12 +302,12 @@
                     <!-- Target norm and functional recovery calculation -->
                     <div class="target-norm-panel">
                         <div class="flex-row-center gap-m">
-                            <label for="targetNormInput" class="text-sm fw-normal text-secondary">🎯 Цільова норма суглоба:</label>
+                            <label for="targetNormInput" id="targetNormLabel" class="text-sm fw-normal text-secondary">🎯 Цільова норма суглоба:</label>
                             <input type="number" id="targetNormInput" value="90" min="10" max="180" step="any" required aria-describedby="targetNormError" class="input-field norm-input">
-                            <span class="text-sm text-muted">град.</span>
+                            <span id="targetNormUnit" class="text-sm text-muted">град.</span>
                         </div>
                         <div class="flex-row-center gap-s">
-                            <span class="text-sm fw-normal text-secondary">Амплітуда відносно цілі:</span>
+                            <span id="recoveryIndexLabel" class="text-sm fw-normal text-secondary">Амплітуда відносно цілі:</span>
                             <span id="recoveryIndexVal" class="recovery-value">—</span>
                         </div>
                         <p id="targetNormError" class="text-sm" role="status" hidden>Введіть скінченне число від 10 до 180°.</p>
@@ -294,24 +315,71 @@
 
                     <div class="metrics-grid mt-s">
                         <div class="metric-box">
-                            <span class="metric-title">Старт курсу (1-ша сесія)</span>
+                            <span class="metric-title" id="summaryTitle1">Старт курсу (1-ша сесія)</span>
                             <span class="metric-val" id="summaryStartAmp">0.0°</span>
                             <span class="metric-sub text-sm text-secondary" id="summaryStartDate">--</span>
                         </div>
                         <div class="metric-box highlight">
-                            <span class="metric-title">Поточний результат (Амплітуда)</span>
+                            <span class="metric-title" id="summaryTitle2">Поточний результат (Амплітуда)</span>
                             <span class="metric-val" id="summaryCurrentAmp" style="color: var(--accent-primary);">0.0°</span>
                             <span class="metric-sub text-sm text-secondary" id="summaryCurrentDate">--</span>
                         </div>
                         <div class="metric-box">
-                            <span class="metric-title">Сер. індекс плавності</span>
+                            <span class="metric-title" id="summaryTitle3">Сер. індекс плавності</span>
                             <span class="metric-val text-success" id="summaryAvgSmooth">0%</span>
-                            <span class="metric-sub text-sm text-secondary">Контроль тремору</span>
+                            <span class="metric-sub text-sm text-secondary" id="summarySub3">Контроль тремору</span>
                         </div>
                         <div class="metric-box">
-                            <span class="metric-title">Всього сесій / згинань</span>
+                            <span class="metric-title" id="summaryTitle4">Всього сесій / згинань</span>
                             <span class="metric-val"><span id="summaryTotalSessions">0</span> <span class="text-secondary fw-normal">сес.</span> / <span id="summaryTotalFlexions" class="text-warning">0</span></span>
-                            <span class="metric-sub text-sm text-secondary">Загальний обсяг навантаження</span>
+                            <span class="metric-sub text-sm text-secondary" id="summarySub4">Загальний обсяг навантаження</span>
+                        </div>
+                    </div>
+
+                    <!-- Compact 2D Quadrant & Center-of-Balance Target Widget (Balance protocols only) -->
+                    <div id="balanceQuadrantWidget" class="quadrant-widget-panel" hidden>
+                        <div class="quadrant-visual-col">
+                            <svg id="balanceQuadrantSvg" class="quadrant-svg" viewBox="0 0 160 160" role="img" aria-labelledby="balanceQuadrantSvgTitle">
+                                <title id="balanceQuadrantSvgTitle">Карта розподілу за 4 квадрантами та центру балансу пацієнта</title>
+                                <circle cx="80" cy="80" r="68" class="quad-outer-ring" />
+                                <path id="quadSectorFL" d="M80,80 L12,80 A68,68 0 0,1 80,12 Z" class="quad-sector" />
+                                <path id="quadSectorFR" d="M80,80 L80,12 A68,68 0 0,1 148,80 Z" class="quad-sector" />
+                                <path id="quadSectorBL" d="M80,80 L12,80 A68,68 0 0,0 80,148 Z" class="quad-sector" />
+                                <path id="quadSectorBR" d="M80,80 L80,148 A68,68 0 0,0 148,80 Z" class="quad-sector" />
+                                <circle cx="80" cy="80" r="23" class="quad-neutral-ring" />
+                                <line x1="12" y1="80" x2="148" y2="80" class="quad-axis-line" />
+                                <line x1="80" y1="12" x2="80" y2="148" class="quad-axis-line" />
+                                <text x="80" y="23" text-anchor="middle" class="quad-axis-text">ВПЕРЕД</text>
+                                <text x="80" y="143" text-anchor="middle" class="quad-axis-text">НАЗАД</text>
+                                <text x="24" y="76" text-anchor="middle" class="quad-axis-text">Л</text>
+                                <text x="136" y="76" text-anchor="middle" class="quad-axis-text">ПР</text>
+                                <circle id="quadCourseCobDot" cx="80" cy="80" r="5" class="quad-cob-course" />
+                                <circle id="quadLatestCobDot" cx="80" cy="80" r="5.5" class="quad-cob-latest" />
+                            </svg>
+                        </div>
+                        <div class="quadrant-stats-col">
+                            <div class="quadrant-panel-title">🧭 Розподіл по 4 квадрантах та Центр Балансу (остання сесія)</div>
+                            <div class="quadrant-cells-grid">
+                                <div class="quadrant-cell">
+                                    <span class="quadrant-cell-label">↖ ПЛ (Вперед-Вліво)</span>
+                                    <strong id="quadValFL">0%</strong>
+                                </div>
+                                <div class="quadrant-cell">
+                                    <span class="quadrant-cell-label">↗ ПП (Вперед-Вправо)</span>
+                                    <strong id="quadValFR">0%</strong>
+                                </div>
+                                <div class="quadrant-cell">
+                                    <span class="quadrant-cell-label">↙ ЗЛ (Назад-Вліво)</span>
+                                    <strong id="quadValBL">0%</strong>
+                                </div>
+                                <div class="quadrant-cell">
+                                    <span class="quadrant-cell-label">↘ ЗП (Назад-Вправо)</span>
+                                    <strong id="quadValBR">0%</strong>
+                                </div>
+                            </div>
+                            <div class="quadrant-cob-summary" id="quadCobSummaryText">
+                                Зміщення CoB: Roll 0.0°, Pitch 0.0° · Симетрія: 0%
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -324,19 +392,19 @@
 
                 <hr class="divider-lg">
 
-                <div class="card-title mb-s">📋 Історія збережених сесій <span id="tableFilterLabel" class="text-sm text-secondary fw-normal">(Всі пацієнти)</span></div>
-                <div class="table-container">
+                <div class="card-title mb-s" id="sessionsTableTitle">📋 Історія збережених сесій <span id="tableFilterLabel" class="text-sm text-secondary fw-normal">(Всі пацієнти)</span></div>
+                <div class="table-container" tabindex="0" role="region" aria-labelledby="sessionsTableTitle">
                     <table>
                         <thead>
                             <tr>
-                                <th>Пацієнт</th>
-                                <th>Дата і Час</th>
-                                <th>Мін / Макс Кут</th>
-                                <th>Амплітуда</th>
-                                <th>Сер. Швидкість</th>
-                                <th>Плавність</th>
-                                <th>Згинання</th>
-                                <th>Дія</th>
+                                <th scope="col" id="thCol1">Пацієнт</th>
+                                <th scope="col" id="thCol2">Дата і Час</th>
+                                <th scope="col" id="thCol3">Мін / Макс Кут</th>
+                                <th scope="col" id="thCol4">Амплітуда</th>
+                                <th scope="col" id="thCol5">Сер. Швидкість</th>
+                                <th scope="col" id="thCol6">Плавність</th>
+                                <th scope="col" id="thCol7">Згинання</th>
+                                <th scope="col" id="thCol8">Дія</th>
                             </tr>
                         </thead>
                         <tbody id="sessionsTableBody">
@@ -454,6 +522,6 @@
     </script>
     <script src="msgpack.min.js"></script>
     <script src="chart.js"></script>
-    <script type="module" src="app.js?v=8"></script>
+    <script type="module" src="app.js?v=9"></script>
 </body>
 </html>

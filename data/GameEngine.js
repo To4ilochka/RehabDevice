@@ -108,6 +108,7 @@ export class GameEngine {
         this.axisInverted = this.invertX;
 
         this.activeGame = null;
+        this.onAutoTare = null;
         this.input = new GameInput();
         this.userInputMode = this.stateManager.get('gameInputMode') || TWO_DIRECTION;
         this.animationId = null;
@@ -396,6 +397,9 @@ export class GameEngine {
             this.activeGame = new GameClass(ctx, this.api);
             this.applyInputMode();
             this.tareInput();
+            if (typeof this.onAutoTare === "function") {
+                this.onAutoTare(this.input.rollTare, this.input.pitchTare);
+            }
             
             const calibMin = this.stateManager.get('calibMin');
             const calibMax = this.stateManager.get('calibMax');

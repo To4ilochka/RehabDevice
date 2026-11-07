@@ -382,10 +382,10 @@ main {
 
 .balance-ring-inner {
     position: absolute;
-    width: 52%;
-    height: 52%;
+    width: 31%;
+    height: 31%;
     border-radius: 50%;
-    border: 1.5px dashed rgba(0, 230, 118, 0.45);
+    border: 1.5px dashed rgba(0, 230, 118, 0.55);
     pointer-events: none;
 }
 
@@ -888,7 +888,15 @@ tr:hover td {
 .active-patient-title { font-size: 1.25rem; color: var(--accent-green); margin-top: 0.25rem; }
 .select-dark { flex: 1; min-width: 0; max-width: 100%; padding: 0.65rem 0.75rem; color: #ffffff; background-color: #1e293b; -webkit-appearance: none; appearance: none; }
 .game-input-controls { min-width: 0; }
-#gameInputMode, #gameSelect { min-width: 0; width: 100%; }
+#gameInputMode, #balanceProtocolSelect, #gameSelect { min-width: 0; width: 100%; }
+#gameInputMode:disabled, #balanceProtocolSelect:disabled { opacity: 0.6; cursor: not-allowed; }
+.static-hold-banner {
+    padding: 0.75rem 0.9rem;
+    background: rgba(0, 230, 118, 0.08);
+    border: 1px solid rgba(0, 230, 118, 0.32);
+    border-radius: 10px;
+    color: #e2e8f0;
+}
 .game-launch-row { align-items: stretch; min-width: 0; flex-wrap: wrap; }
 .game-launch-row #gameSelect { flex: 1 1 10.5rem; }
 .game-launch-row #btnModeGame { flex: 0 0 auto; min-height: 44px; }
@@ -964,6 +972,164 @@ button:focus-visible, input:focus-visible, select:focus-visible, .tab-btn:focus-
 #tabDoctor button:disabled { opacity: 0.5; cursor: default; transform: none; }
 #tabDoctor .patient-pills-strip { flex-wrap: wrap; overflow: visible; }
 #tabDoctor .patient-pill { white-space: normal; text-align: left; }
+
+/* 3-Protocol Segmented Filter & 2D Balance Quadrant Widget */
+#tabDoctor .protocol-switch-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    min-width: 0;
+    max-width: 100%;
+}
+#tabDoctor .protocol-pill {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: var(--text-secondary);
+    padding: 0.5rem 0.875rem;
+    border-radius: 12px;
+    font-size: 0.875rem;
+    line-height: 1.25;
+    font-weight: 600;
+    min-height: 44px;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    text-align: left;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+#tabDoctor .protocol-pill:hover {
+    background: rgba(0, 242, 254, 0.12);
+    border-color: rgba(0, 242, 254, 0.4);
+    color: #ffffff;
+}
+#tabDoctor .protocol-pill.active {
+    background: linear-gradient(135deg, rgba(0, 242, 254, 0.22) 0%, rgba(79, 172, 254, 0.28) 100%);
+    border-color: var(--accent-primary);
+    color: #ffffff;
+    font-weight: 700;
+    box-shadow: 0 0 12px rgba(0, 242, 254, 0.22);
+}
+#tabDoctor .quadrant-widget-panel {
+    margin-top: 0.85rem;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.32);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    min-width: 0;
+    max-width: 100%;
+}
+#tabDoctor .quadrant-visual-col {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    min-width: 0;
+    max-width: 100%;
+}
+#tabDoctor .quadrant-svg {
+    display: block;
+    width: 152px;
+    height: 152px;
+    max-width: 100%;
+}
+#tabDoctor .quad-outer-ring {
+    fill: rgba(10, 14, 23, 0.78);
+    stroke: rgba(0, 242, 254, 0.45);
+    stroke-width: 2;
+}
+#tabDoctor .quad-sector {
+    fill: rgba(0, 242, 254, 0.08);
+    stroke: none;
+    transition: fill 0.25s ease;
+}
+#tabDoctor .quad-neutral-ring {
+    fill: rgba(0, 230, 118, 0.08);
+    stroke: rgba(0, 230, 118, 0.55);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 3;
+}
+#tabDoctor .quad-axis-line {
+    stroke: rgba(255, 255, 255, 0.18);
+    stroke-width: 1;
+}
+#tabDoctor .quad-axis-text {
+    fill: rgba(255, 255, 255, 0.7);
+    font-size: 8.5px;
+    font-weight: 700;
+}
+#tabDoctor .quad-cob-course {
+    fill: rgba(148, 163, 184, 0.85);
+    stroke: #ffffff;
+    stroke-width: 1.25;
+}
+#tabDoctor .quad-cob-latest {
+    fill: #ff9100;
+    stroke: #ffffff;
+    stroke-width: 1.75;
+}
+#tabDoctor .quadrant-stats-col {
+    flex: 1 1 13rem;
+    min-width: 0;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+#tabDoctor .quadrant-panel-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    min-width: 0;
+}
+#tabDoctor .quadrant-cells-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    min-width: 0;
+    max-width: 100%;
+}
+#tabDoctor .quadrant-cell {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 8px;
+    padding: 0.5rem 0.65rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+}
+#tabDoctor .quadrant-cell-label {
+    font-size: 0.74rem;
+    color: var(--text-secondary);
+    line-height: 1.35;
+}
+#tabDoctor .quadrant-cell strong {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--accent-primary);
+}
+#tabDoctor .quadrant-cob-summary {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.45;
+    min-width: 0;
+}
+@media (max-width: 380px) {
+    #tabDoctor .quadrant-cells-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
 #tabDoctor .summary-title { font-size: 1.25rem; }
 #tabDoctor .metrics-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));

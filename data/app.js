@@ -1,6 +1,6 @@
 import { StateManager } from './StateManager.js';
 import { NetworkService } from './NetworkService.js';
-import { UIManager } from './UIManager.js?v=8';
+import { UIManager } from './UIManager.js?v=9';
 import { GameEngine } from './GameEngine.js';
 
 function initApp() {
@@ -11,6 +11,9 @@ function initApp() {
     
     // Expose engine instance for UIManager button callbacks
     window.engineInstance = gameEngine;
+    gameEngine.onAutoTare = (tareRoll, tarePitch) => {
+        networkService.sendCommand("setTare", { tareRoll, tarePitch });
+    };
     
     networkService.onStatusChange((isConnected, isHttpFallback) => {
         stateManager.updateMultiple({ isConnected, isHttpFallback });
@@ -24,12 +27,23 @@ function initApp() {
         } else if (data.type === "status") {
             stateManager.updateMultiple({
                 globalSdAvailable: data.sdAvailable !== false,
+                storageLowSpace: Boolean(data.storageLowSpace),
                 currentFirmwareVersion: data.version || stateManager.get('currentFirmwareVersion'),
                 memoryUsage: { used: data.usedBytes || 0, total: data.totalBytes || 1 }
             });
             
             if (data.sessionActive) {
+                const rawMode = Number(data.sessionMode);
+                const safeMode = (rawMode === 1 || rawMode === 2) ? rawMode : 0;
+                const targetInputMode = safeMode === 0 ? "two-direction" : "four-direction";
+                const targetSubProto = safeMode === 1 ? "static" : "dynamic";
+                if (gameEngine.userInputMode !== targetInputMode) {
+                    gameEngine.setInputMode(targetInputMode);
+                }
                 stateManager.updateMultiple({
+                    activeSessionMode: safeMode,
+                    gameInputMode: targetInputMode,
+                    balanceSubProtocol: targetSubProto,
                     isAuthorized: true,
                     currentPatientName: data.patientId
                 });
