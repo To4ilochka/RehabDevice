@@ -18,8 +18,8 @@ This file describes the checked-in ESP32 firmware, browser application, and supp
 | `include/Config.h` | Hardware pins, firmware defaults, sensor mode, analytics thresholds, AP settings, and a few currently unused constants. |
 | `include/SystemCommands.h` | Web-to-loop command enum and fixed-size command payload. |
 | `src/SensorMPU.cpp`, `include/SensorMPU.h` | MPU6050-compatible device setup, DMP FIFO reads, 3D gravity-frame zero calibration, angle normalization, and synchronized latest-sample access. |
-| `src/AnalyticsEngine.cpp`, `include/AnalyticsEngine.h` | Session lifecycle, continuous roll integration (ignoring zero-recalibration jumps), extrema, speed, jerk-derived smoothness, flexion count, and live JSON. |
-| `src/DatabaseManager.cpp`, `include/DatabaseManager.h` | SQLite schema, LittleFS/SD selection and migration, queued writes, paginated reads, and deletes. |
+| `src/AnalyticsEngine.cpp`, `include/AnalyticsEngine.h` | Session lifecycle across Wrist (`0`), Balance Static (`1`), and Balance Dynamic (`2`) modes, mounting/tare mapping, continuous 2-way roll integration, 4-way time-weighted sway RMS / neutral-zone hold / CoB / 4-quadrant distribution, duration-normalized smoothness, and live JSON. |
+| `src/DatabaseManager.cpp`, `include/DatabaseManager.h` | Unified `sessions` SQLite schema with idempotent `ALTER TABLE` migration, LittleFS/SD selection and read-safe LittleFS-to-SD merge, `<100 KiB` LittleFS write guard, queued writes, sparse MessagePack paginated reads, and deletes. |
 | `src/SDManager.cpp`, `include/SDManager.h` | Optional SD card mount using the configured chip-select pin. |
 | `src/WiFiManagerModule.cpp`, `include/WiFiManagerModule.h` | SoftAP setup, DHCP option changes, mDNS name/service, and station count. |
 | `src/WebServerModule.cpp`, `include/WebServerModule.h` | Async HTTP routes, WebSocket events and broadcasts, static LittleFS serving, chunked MessagePack session output, and ElegantOTA registration. |
@@ -48,7 +48,7 @@ Use the module that owns a behavior. Keep firmware sensor acquisition, command d
 4. Initializes SQLite using the SD availability flag. When SD is selected, the manager attempts to copy an existing `/rehab.db` from LittleFS to SD and then removes the LittleFS copy after successful migration. If no SD is available, the active path is `/littlefs/rehab.db`.
 5. Starts SoftAP/mDNS and the asynchronous web server.
 6. Initializes the MPU/DMP. Sensor failure is a warning; the program still creates queues/tasks, and `SensorMPU::update()` then returns without samples when DMP is not ready.
-7. Creates `mpuDataQueue` (100 `MPUData` items), `sysCommandQueue` (10 `SysCommandMsg` items), and `dbQueue` (10 `SessionRecord` items), then creates `SensorTask` and `DBTask` pinned to core 0, each with a 4096 stack argument.
+7. Creates `mpuDataQueue` (100 `MPUData` items), `sysCommandQueue` (10 `SysCommandMsg` items), and `dbQueue` (10 `SessionRecord` items), then creates `SensorTask` (4096 stack) and `DBTask` (8192 stack) pinned to core 0.
 
 The web server is started before `sysCommandQueue` is created; `WebServerModule` command handlers check `sysCommandQueue != NULL` and drop early commands until queue initialization. Preserve that guard when changing startup or adding commands. Task-creation and queue-creation return values are not currently checked; do not assume startup detects allocation failure.
 
@@ -74,15 +74,15 @@ The web server is started before `sysCommandQueue` is created; `WebServerModule`
 1. The MPU DMP produces FIFO packets. `SensorMPU::init()` starts I2C on GPIO 21/22 at 100 kHz, probes address `0x68`, initializes/calibrates the DMP, then switches I2C to 400 kHz. Accepted WHO_AM_I values include `0x68`, `0x70`, `0x71`, `0x73`, and `0x98`.
 2. With `MPU_USE_INTERRUPT=1`, GPIO 17 rising-edge ISR notifies `SensorTask` using `vTaskNotifyGiveFromISR`; the ISR does not read I2C. With the current default `0`, no interrupt is attached and the task polls after a 5 ms delay. The actual DMP/output sample rate must be measured; do not infer 100 Hz from old prose or comments.
 3. FIFO overflow (`status` overflow bit or at least 1024 bytes), invalid quaternion norm (`normSq` outside 0.5..1.5), and non-finite angles cause FIFO reset or packet rejection. The sensor converts raw gyro values by 131 LSB/(degree/s), accelerometer values by 16384 LSB/g, rotates the DMP gravity vector by `gravRefMatrix` (shortest-arc Rodrigues rotation mapping the calibrated resting gravity vector to `(0, 0, +1)` without 6-axis yaw drift or `gz < 0` pitch discontinuities), and normalizes calibrated Yaw/Pitch/Roll to `[-180, 180]`.
-4. `loop()` processes every sample it successfully dequeues. `AnalyticsEngine` uses roll as the joint metric and integrates the shortest signed difference between successive normalized rolls (skipping the step delta on the sample flagged with `data.recalibrated`), so its session angle can be continuous beyond +/-180 degrees without recording phantom flexions on mid-session zeroing. The live visualizer still receives the current normalized roll and pitch.
-5. Session analytics track global minimum/maximum continuous angle, amplitude as max minus min, average three-axis gyro magnitude, jerk spikes, flexion reversals, and elapsed `millis()` duration. A jerk above 300 degree/s^2 lowers smoothness by 1.5 points per spike, floored at zero. The hysteresis reversal threshold is 4 degrees. No raw session trace is stored in the SQLite schema.
+4. `loop()` processes every sample it successfully dequeues. `AnalyticsEngine` applies mounting orientation flags (`invertX`, `invertY`, `swapAxes`) and software tare (`tareRoll`, `tarePitch`). In 2-way Wrist mode (`0`), it integrates the shortest signed difference between successive normalized rolls (skipping the step delta on `data.recalibrated`) so session angle is continuous beyond +/-180 degrees. In 4-way Balance Static (`1`) and Dynamic (`2`) modes, it tracks shortest-delta tared roll/pitch tilt, time-weighted `swayRms` (`mlRms`/`apRms`), `<= 5.0` degree `stabilityPct`, `meanRoll`/`meanPitch` CoB bias, and 4-quadrant percentages (`qFL`, `qFR`, `qBL`, `qBR` outside `1.5` degrees).
+5. Across all modes, smoothness is duration-normalized (`spikesPerMin = tremorSpikesCount / max(activeMotionSec, 5.0) * 60`, `smoothness = clamp(100 - spikesPerMin * 1.5, 0, 100)`). Wrist hysteresis reversal threshold is 4 degrees. No raw session trace is stored in SQLite.
 6. Session start captures system Unix time if already synchronized; otherwise the timestamp falls back to elapsed uptime. The browser sends `syncTime` on connection. Human-readable date fallback is a session-relative string, not a calendar timestamp.
 
-`ANALYTICS_HOLD_TOLERANCE_DEG`, `ANALYTICS_HOLD_MAX_SPEED_DEG_S`, `FS_MIN_FREE_BYTES`, and `FS_SESSIONS_DIR` are currently declared but have no implementation references. Do not describe hold detection, LittleFS retention cleanup, or per-patient JSONL storage as implemented. `AngleMath.h` normalizes a difference by adding/subtracting one revolution; its intended input is the difference of two already-normalized angles.
+`ANALYTICS_HOLD_TOLERANCE_DEG`, `ANALYTICS_HOLD_MAX_SPEED_DEG_S`, and `FS_SESSIONS_DIR` are currently declared but have no implementation references. `FS_MIN_FREE_BYTES` (`100 KiB`) guards LittleFS writes without auto-deleting un-migrated patient data (`storageLowSpace: true`). `AngleMath.h` provides shortest-angle difference, orientation mapping, and 4-quadrant symmetry helpers.
 
 ### Session persistence
 
-- `sessions` is the only created table: `id INTEGER PRIMARY KEY AUTOINCREMENT`, `patient_id TEXT`, `timestamp INTEGER`, `date_str TEXT`, `min_angle REAL`, `max_angle REAL`, `amplitude REAL`, `avg_speed REAL`, `smoothness REAL`, `flexions_count INTEGER`, and `session_duration REAL`.
+- `sessions` is the unified table: core columns (`id`, `patient_id`, `timestamp`, `date_str`, `min_angle`, `max_angle`, `amplitude`, `avg_speed`, `smoothness`, `flexions_count`, `session_duration`) plus `session_mode INTEGER DEFAULT 0` and 12 nullable `REAL` balance columns (`min_pitch`, `max_pitch`, `mean_roll`, `mean_pitch`, `sway_rms`, `ml_rms`, `ap_rms`, `stability_pct`, `q_fl`, `q_fr`, `q_bl`, `q_br`), migrated idempotently via `PRAGMA table_info`. Sparse MessagePack serialization omits the 12 balance keys when `sessionMode == 0`.
 - Completed sessions are inserted asynchronously through `dbQueue`. There are up to three insert attempts with brief delays and a SQLite busy timeout of 1000 ms. SQLite memory-status and lookaside allocations are disabled at initialization.
 - Reads are ordered by `timestamp DESC` and use `limit`/`offset`. The query is streamed as a MessagePack array; each row is stepped and serialized into an async response buffer rather than building one full JSON response.
 - Patient/session deletion is permanent and removes matching rows; there is no separate patient table or foreign-key relation.
@@ -101,9 +101,9 @@ The web server is started before `sysCommandQueue` is created; `WebServerModule`
 
 | Interface | Current contract |
 |---|---|
-| `GET /api/status` | JSON status, connected-client count, session/patient state, current `angle` (roll compatibility alias), numeric `roll` and `pitch`, SD availability, and sensor mutex misses. `usedBytes` and `totalBytes` are hard-coded to zero. This route does not set firmware version. |
-| `GET /api/sessions?offset=N&limit=N` | Paged `application/msgpack` array of session objects. Defaults are offset 0 and limit 50. Current handler does not clamp/validate pagination bounds. |
-| `GET /api/cmd?action=...` | Mutating command endpoint for `syncTime`, `startSession`, `stopSession`, `recalibrate`, `deletePatient`, `deleteSession`, and `reboot`. It uses GET and has no authentication. Reboot responds first, then delays 500 ms in a short-lived task before restarting. |
+| `GET /api/status` | JSON status, connected-client count, session/patient/`sessionMode` state, `storageLowSpace`, current `angle` (roll compatibility alias), numeric `roll` and `pitch`, SD availability, and sensor mutex misses. `usedBytes` and `totalBytes` are zero when SD is active and reflect LittleFS usage otherwise. This route does not set firmware version. |
+| `GET /api/sessions?offset=N&limit=N` | Paged `application/msgpack` array of session objects. Defaults are offset 0 and limit 50 (clamped to `limit` 1..200 and `offset >= 0`). |
+| `GET /api/cmd?action=...` | Mutating command endpoint for `syncTime`, `startSession`, `stopSession`, `recalibrate`, `syncOrientation`, `setTare`, `deletePatient`, `deleteSession`, and `reboot`. It uses GET and has no authentication. Reboot responds first, then delays 500 ms in a short-lived task before restarting. |
 | WebSocket `/ws` | Client messages are JSON commands for time sync, session start/stop, recalibration, and deletes. Decimated `angle` messages include the roll compatibility alias plus numeric `roll` and `pitch`; other server messages include `liveStats` and `status`, and WebSocket status includes firmware version. |
 | ElegantOTA `/update` | Registered by `ElegantOTA.begin(&server)`. The UI also downloads release assets from GitHub and posts them to the device update endpoint. This changes device firmware/filesystem. |
 | `/` and static files | `serveStatic("/", LittleFS, "/")`, default `index.html`, with cache revalidation. Missing root gets fallback HTML; missing GET assets log and return 404. |
@@ -179,9 +179,11 @@ SQLite paths are `/sd/rehab.db` and `/littlefs/rehab.db`. LittleFS also serves t
 | `STATUS_UPDATE_INTERVAL_MS` | 2000 | WebSocket status broadcast throttle. |
 | `ANALYTICS_HYSTERESIS_DEG` | 4.0 | Flexion state reversal threshold. |
 | `ANALYTICS_TREMOR_JERK_THRESHOLD` | 300.0 | Jerk threshold in the analytics path. |
-| `ANALYTICS_HOLD_TOLERANCE_DEG` | 3.5 | Declared but unused; there is no hold-time detector. |
-| `ANALYTICS_HOLD_MAX_SPEED_DEG_S` | 6.0 | Declared but unused; there is no hold-time detector. |
-| `FS_MIN_FREE_BYTES` | 100 KiB | Declared but unused; no free-space retention cleanup is implemented. |
+| `ANALYTICS_BALANCE_NEUTRAL_DEG` | 5.0 | Planar tilt radius threshold for 4-way neutral-zone hold (`stabilityPct`). |
+| `ANALYTICS_QUADRANT_DEADZONE_DEG` | 1.5 | Center deadzone radius before attributing 4-way dwell time to a quadrant. |
+| `ANALYTICS_HOLD_TOLERANCE_DEG` | 3.5 | Declared but unused; there is no 1D wrist hold-time detector. |
+| `ANALYTICS_HOLD_MAX_SPEED_DEG_S` | 6.0 | Declared but unused; there is no 1D wrist hold-time detector. |
+| `FS_MIN_FREE_BYTES` | 100 KiB | LittleFS free-space floor; blocks new LittleFS writes/sessions without deleting un-migrated rows. |
 | `FS_SESSIONS_DIR` | `/p` | Declared but unused; no per-patient JSONL files are implemented. |
 
 `DEBUG_VERBOSE` is checked in `WebServerModule.cpp` but is not defined by the project configuration. Do not assume it is enabled. `CMD_REBOOT`/`CMD_SWITCH_MODE` are also unused enum values.

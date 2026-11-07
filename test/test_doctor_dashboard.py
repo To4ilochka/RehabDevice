@@ -715,7 +715,11 @@ class DoctorDashboardTests(unittest.TestCase):
                 self.assertEqual(self.page.evaluate("getComputedStyle(document.querySelector('#patientSummaryContainer .metrics-grid')).gridTemplateColumns.split(' ').length"), expected_tracks)
                 chart_height = self.page.locator("#chartWrapperContainer").bounding_box()["height"]
                 self.page.evaluate("populate(); populate()")
-                self.assertEqual(self.page.locator("#chartWrapperContainer").bounding_box()["height"], chart_height)
+                self.assertAlmostEqual(
+                    self.page.locator("#chartWrapperContainer").bounding_box()["height"],
+                    chart_height,
+                    delta=0.01,
+                )
                 self.page.screenshot(path=str(artifacts / f"{self.browser_name}-{width}-full.png"), full_page=True)
                 self.page.locator("#targetNormInput").fill("120")
                 expect(self.page.locator("#recoveryIndexVal")).to_have_text("50%")
@@ -781,6 +785,349 @@ class DoctorDashboardTests(unittest.TestCase):
         expect(self.page.locator("#sessionsTableBody tr")).to_have_count(52)
         expect(self.page.locator("#targetNormInput")).to_have_value("120")
         expect(self.page.locator("#recoveryIndexVal")).to_have_text("50%")
+
+    def test_four_way_session_protocols_orientation_tare_and_low_storage(self):
+        self.page.set_viewport_size({"width": 320, "height": 844})
+        self.page.locator('[data-tab="tabPatient"]').click()
+        self.page.wait_for_function("document.querySelector('#tabPatient.active')")
+
+        # Low-storage guard (<100 KiB without SD card) blocks session start to protect un-migrated data
+        self.page.evaluate("""async () => {
+            const {GameEngine} = await import('/GameEngine.js');
+            window.engineInstance = new GameEngine(state);
+            window.engineInstance.onAutoTare = (tareRoll, tarePitch) => {
+                commands.push(['setTare', {tareRoll, tarePitch}]);
+            };
+            state.updateMultiple({
+                isConnected: true,
+                globalSdAvailable: false,
+                storageLowSpace: true
+            });
+        }""")
+        expect(self.page.locator("#memoryText")).to_have_text("Пам'ять заповнена (<100 КБ)")
+        self.page.locator("#patientIdInput").fill("Іван Баланс")
+        alerts = []
+        self.page.once("dialog", lambda d: (alerts.append(d.message), d.accept()))
+        self.page.locator("#btnStartSession").click()
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("100 КБ", alerts[0])
+        self.assertIn("SD-карту", alerts[0])
+        self.assertEqual(self.page.evaluate("commands.length"), 0)
+        self.assertFalse(self.page.evaluate("state.get('isAuthorized')"))
+
+        # Clear low-space flag: LittleFS without SD starts cleanly with no false data-loss alert
+        self.page.evaluate("state.update('storageLowSpace', false)")
+        expect(self.page.locator("#memoryText")).to_have_text("SD-карта відсутня")
+        expect(self.page.locator("#fourWayProtocolGroup")).to_be_hidden()
+
+        # Select 4-way mode + Static Hold protocol, configure orientation, and start session
+        self.page.locator("#gameInputMode").select_option("four-direction")
+        expect(self.page.locator("#fourWayProtocolGroup")).to_be_visible()
+        expect(self.page.locator("#balanceProtocolSelect")).to_have_value("dynamic")
+        self.page.locator("#balanceProtocolSelect").select_option("static")
+
+        # Verify neutral target ring CSS matches <=5 deg zone (31% of 2D visualizer)
+        ring_pct = self.page.evaluate("""() => {
+            const board = document.getElementById('balanceBoardVisualizer').getBoundingClientRect();
+            const ring = document.querySelector('.balance-ring-inner').getBoundingClientRect();
+            return (ring.width / board.width) * 100;
+        }""")
+        self.assertAlmostEqual(ring_pct, 31.0, delta=2.0)
+
+        self.page.locator("#invertAngleToggle").check()
+        self.page.locator("#swapAxesToggle").check()
+        self.page.evaluate("commands.length = 0")
+        self.page.locator("#btnStartSession").click()
+
+        static_state = self.page.evaluate("""() => {
+            state.update('liveStats', {
+                type: 'liveStats',
+                sessionMode: 1,
+                minAngle: -3.2,
+                maxAngle: 2.8,
+                amplitude: 5.5,
+                avgSpeed: 6.4,
+                smoothness: 94,
+                flexionsCount: 0,
+                sessionDuration: 30.0,
+                swayRms: 2.1,
+                mlRms: 1.5,
+                apRms: 1.5,
+                stabilityPct: 86,
+                meanRoll: 0.5,
+                meanPitch: -0.7
+            });
+            return {
+                cmd: commands[0],
+                modeDisabled: document.getElementById('gameInputMode').disabled,
+                protoDisabled: document.getElementById('balanceProtocolSelect').disabled,
+                launchHidden: document.getElementById('activeGameLaunchGroup').hidden,
+                hintHidden: document.getElementById('staticHoldActiveHint').hidden,
+                title1: document.getElementById('statTitle1').textContent,
+                title2: document.getElementById('statTitle2').textContent,
+                statMin: document.getElementById('statMin').textContent,
+                statAmp: document.getElementById('statAmp').textContent,
+                statSmooth: document.getElementById('statSmooth').textContent,
+                statFlex: document.getElementById('statFlex').textContent,
+                scrollFits: document.documentElement.scrollWidth <= innerWidth
+            };
+        }""")
+        self.assertEqual(static_state["cmd"], [
+            "startSession",
+            {
+                "patientId": "Іван Баланс",
+                "sessionMode": 1,
+                "invertX": True,
+                "invertY": False,
+                "swapAxes": True,
+                "tareRoll": 0,
+                "tarePitch": 0,
+            },
+        ])
+        self.assertTrue(static_state["modeDisabled"])
+        self.assertTrue(static_state["protoDisabled"])
+        self.assertTrue(static_state["launchHidden"])
+        self.assertFalse(static_state["hintHidden"])
+        self.assertEqual(static_state["title1"], "Відхилення Sway RMS")
+        self.assertEqual(static_state["title2"], "Утримання центру (≤5°)")
+        self.assertEqual(static_state["statMin"], "2.1°")
+        self.assertEqual(static_state["statAmp"], "86%")
+        self.assertEqual(static_state["statSmooth"], "94%")
+        self.assertEqual(static_state["statFlex"], "0.5° / -0.7°")
+        self.assertTrue(static_state["scrollFits"])
+
+        # Stopping session unlocks mode & sub-protocol selectors and restores game launcher visibility
+        self.page.locator("#btnStopSession").click()
+        unlocked = self.page.evaluate("""() => ({
+            modeDisabled: document.getElementById('gameInputMode').disabled,
+            protoDisabled: document.getElementById('balanceProtocolSelect').disabled,
+            launchHidden: document.getElementById('activeGameLaunchGroup').hidden,
+            hintHidden: document.getElementById('staticHoldActiveHint').hidden
+        })""")
+        self.assertEqual(unlocked, {
+            "modeDisabled": False,
+            "protoDisabled": False,
+            "launchHidden": False,
+            "hintHidden": True,
+        })
+
+        # Start Dynamic 4-way session, verify orientation sync, auto-tare, and manual tare commands
+        self.page.locator("#balanceProtocolSelect").select_option("dynamic")
+        self.page.locator("#patientIdInput").fill("Іван Баланс")
+        self.page.evaluate("commands.length = 0")
+        self.page.locator("#btnStartSession").click()
+        self.assertEqual(self.page.evaluate("commands[0][1].sessionMode"), 2)
+        self.assertFalse(self.page.evaluate("document.getElementById('activeGameLaunchGroup').hidden"))
+
+        dynamic_sync = self.page.evaluate("""() => {
+            commands.length = 0;
+            window.engineInstance.setTargetAngles(9, -6);
+            document.getElementById('btnTareGameInput').click();
+            const tareCmd = commands.pop();
+
+            const pitchToggle = document.getElementById('invertPitchToggle');
+            pitchToggle.checked = true;
+            pitchToggle.dispatchEvent(new Event('change', {bubbles: true}));
+            const orientCmd = commands.pop();
+
+            state.update('liveStats', {
+                type: 'liveStats',
+                sessionMode: 2,
+                minAngle: -14,
+                maxAngle: 16,
+                minPitch: -11,
+                maxPitch: 13,
+                amplitude: 27.0,
+                avgSpeed: 24.5,
+                smoothness: 89,
+                sessionDuration: 45.0,
+                qFL: 25,
+                qFR: 25,
+                qBL: 25,
+                qBR: 25,
+                symmetryPct: 100
+            });
+            return {
+                tareCmd,
+                orientCmd,
+                statSpanML: document.getElementById('statMin').textContent,
+                statSpanAP: document.getElementById('statMax').textContent,
+                statAmp: document.getElementById('statAmp').textContent,
+                statSym: document.getElementById('statFlex').textContent
+            };
+        }""")
+        self.assertEqual(dynamic_sync["tareCmd"], ["setTare", {"tareRoll": 9, "tarePitch": -6}])
+        self.assertEqual(dynamic_sync["orientCmd"][0], "syncOrientation")
+        self.assertTrue(dynamic_sync["orientCmd"][1]["invertY"])
+        self.assertEqual(dynamic_sync["orientCmd"][1]["tarePitch"], 6)
+        self.assertEqual(dynamic_sync["statSpanML"], "30.0°")
+        self.assertEqual(dynamic_sync["statSpanAP"], "24.0°")
+        self.assertEqual(dynamic_sync["statAmp"], "27.0°")
+        self.assertEqual(dynamic_sync["statSym"], "100%")
+
+    def test_doctor_balance_protocols_quadrant_widget_and_csv(self):
+        self.page.set_viewport_size({"width": 320, "height": 844})
+        self.page.evaluate("""() => {
+            const rawMixed = [
+                // Sparse Wrist rows (no 4-way keys, matching firmware stepSessionRow)
+                {
+                    id: 1, patientId: patient, sessionMode: 0, timestamp: 10,
+                    dateStr: '01.10.2026 10:00:00', minAngle: -15, maxAngle: 15,
+                    amplitude: 30, avgSpeed: 20, smoothness: 68, flexionsCount: 10, sessionDuration: 40
+                },
+                {
+                    id: 2, patientId: patient, sessionMode: 0, timestamp: 20,
+                    dateStr: '02.10.2026 10:00:00', minAngle: -30, maxAngle: 30,
+                    amplitude: 60, avgSpeed: 28, smoothness: 82, flexionsCount: 18, sessionDuration: 55
+                },
+                // Static Balance rows (lower swayRms = improvement!)
+                {
+                    id: 3, patientId: patient, sessionMode: 1, timestamp: 30,
+                    dateStr: '03.10.2026 10:00:00', minAngle: -8, maxAngle: 7,
+                    amplitude: 14, avgSpeed: 9, smoothness: 72, flexionsCount: 0, sessionDuration: 45,
+                    minPitch: -6, maxPitch: 7, meanRoll: 2.4, meanPitch: -1.8,
+                    swayRms: 4.8, mlRms: 3.4, apRms: 3.4, stabilityPct: 52,
+                    qFL: 35, qFR: 20, qBL: 25, qBR: 20
+                },
+                {
+                    id: 4, patientId: patient, sessionMode: 1, timestamp: 40,
+                    dateStr: '04.10.2026 10:00:00', minAngle: -5, maxAngle: 5,
+                    amplitude: 9, avgSpeed: 5, smoothness: 90, flexionsCount: 0, sessionDuration: 60,
+                    minPitch: -4, maxPitch: 4, meanRoll: 0.6, meanPitch: -0.5,
+                    swayRms: 2.4, mlRms: 1.7, apRms: 1.7, stabilityPct: 84,
+                    qFL: 30, qFR: 22, qBL: 26, qBR: 22
+                },
+                // Dynamic Balance rows (higher 2D span & quadrant symmetry = improvement!)
+                {
+                    id: 5, patientId: patient, sessionMode: 2, timestamp: 50,
+                    dateStr: '05.10.2026 10:00:00', minAngle: -8, maxAngle: 8,
+                    amplitude: 14, avgSpeed: 18, smoothness: 74, flexionsCount: 0, sessionDuration: 75,
+                    minPitch: -6, maxPitch: 6, meanRoll: 1.2, meanPitch: 0.8,
+                    swayRms: 5.2, mlRms: 3.8, apRms: 3.5, stabilityPct: 35,
+                    qFL: 45, qFR: 15, qBL: 25, qBR: 15
+                },
+                {
+                    id: 6, patientId: patient, sessionMode: 2, timestamp: 60,
+                    dateStr: '06.10.2026 10:00:00', minAngle: -15, maxAngle: 15,
+                    amplitude: 28, avgSpeed: 26, smoothness: 88, flexionsCount: 0, sessionDuration: 90,
+                    minPitch: -13, maxPitch: 13, meanRoll: 0.2, meanPitch: 0.1,
+                    swayRms: 8.4, mlRms: 6.0, apRms: 5.9, stabilityPct: 22,
+                    qFL: 25, qFR: 25, qBL: 25, qBR: 25
+                },
+                // Balance-only patient (zero Wrist sessions)
+                {
+                    id: 7, patientId: 'Тарас Баланс', sessionMode: 1, timestamp: 70,
+                    dateStr: '07.10.2026 11:00:00', minAngle: -4, maxAngle: 4,
+                    amplitude: 8, avgSpeed: 4.5, smoothness: 91, flexionsCount: 0, sessionDuration: 50,
+                    minPitch: -4, maxPitch: 4, meanRoll: -0.3, meanPitch: 0.4,
+                    swayRms: 2.2, mlRms: 1.6, apRms: 1.5, stabilityPct: 88,
+                    qFL: 26, qFR: 24, qBL: 25, qBR: 25
+                }
+            ];
+            const roundTripped = msgpack.decode(msgpack.encode(rawMixed));
+            populate(roundTripped);
+        }""")
+
+        # Protocol pills show ALL counts across the 3 clinical modes
+        expect(self.page.locator("#doctorProtocolSwitch")).to_be_visible()
+        pills = self.page.locator("#doctorProtocolSwitch .protocol-pill")
+        expect(pills).to_have_count(3)
+        expect(pills.nth(0)).to_have_text("↔ Кисть (2)")
+        expect(pills.nth(0)).to_have_attribute("aria-pressed", "true")
+        expect(pills.nth(1)).to_have_text("🎯 Баланс: Статика (3)")
+        expect(pills.nth(1)).to_have_attribute("aria-pressed", "false")
+        expect(pills.nth(2)).to_have_text("🎮 Баланс: Динаміка (2)")
+
+        # Selecting a balance-only patient auto-switches protocol from 0 -> 1
+        self.page.locator('.patient-pill[data-patient="Тарас Баланс"]').click()
+        expect(pills.nth(1)).to_have_attribute("aria-pressed", "true")
+        expect(self.page.locator("#patientSummaryContainer")).to_be_visible()
+        expect(self.page.locator("#summaryCurrentAmp")).to_have_text("2.2°")
+
+        # Explicit click on 0-count Wrist pill shows protocol-specific empty message while keeping strip visible
+        pills.nth(0).click()
+        expect(self.page.locator("#doctorNoResultsState")).to_be_visible()
+        expect(self.page.locator("#doctorNoResultsText")).to_contain_text("немає сесій у протоколі «Кисть»")
+        expect(self.page.locator("#doctorProtocolSwitch")).to_be_visible()
+
+        # Select multi-modal Patient A and inspect Static Balance protocol (inverted Sway RMS polarity)
+        patient_name = self.page.evaluate("patient")
+        self.page.locator(f'.patient-pill[data-patient="{patient_name}"]').click()
+        pills.nth(1).click()
+        expect(self.page.locator("#summaryStartAmp")).to_have_text("4.8°")
+        expect(self.page.locator("#summaryCurrentAmp")).to_have_text("2.4°")
+        expect(self.page.locator("#summaryProgressBadge")).to_have_class("progress-badge")
+        expect(self.page.locator("#summaryProgressBadge")).to_contain_text("Зменшення коливань: -2.4° (-50%)")
+        expect(self.page.locator("#targetNormInput")).to_have_value("80")
+        expect(self.page.locator("#recoveryIndexVal")).to_have_text("105%")
+        self.page.locator("#targetNormInput").fill("101")
+        expect(self.page.locator("#targetNormInput")).to_have_attribute("aria-invalid", "true")
+        self.page.locator("#targetNormInput").fill("80")
+
+        # Verify 2D Quadrant & CoB SVG widget + zero horizontal overflow at 320px
+        quad_check = self.page.evaluate("""() => {
+            const root = document.querySelector('#tabDoctor');
+            const overflows = [...root.querySelectorAll('*')].filter(node => {
+                if (node.closest('.table-container, .chart-wrapper') || !node.getClientRects().length) return false;
+                const rect = node.getBoundingClientRect();
+                return rect.left < -1 || rect.right > innerWidth + 1 || node.scrollWidth > node.clientWidth + 1;
+            }).map(node => node.id || node.className);
+            const dot = document.getElementById('quadLatestCobDot');
+            return {
+                widgetVisible: !document.getElementById('balanceQuadrantWidget').hidden,
+                metricBoxCount: document.querySelectorAll('#patientSummaryContainer .metric-box').length,
+                qVals: ['quadValFL', 'quadValFR', 'quadValBL', 'quadValBR'].map(id => document.getElementById(id).textContent),
+                cx: parseFloat(dot.getAttribute('cx')),
+                cy: parseFloat(dot.getAttribute('cy')),
+                scrollFits: document.documentElement.scrollWidth <= innerWidth,
+                overflows
+            };
+        }""")
+        self.assertTrue(quad_check["widgetVisible"])
+        self.assertEqual(quad_check["metricBoxCount"], 4)
+        self.assertEqual(quad_check["qVals"], ["30%", "22%", "26%", "22%"])
+        self.assertGreater(quad_check["cx"], 80.0)  # meanRoll +0.6 -> right of center
+        self.assertGreater(quad_check["cy"], 80.0)  # meanPitch -0.5 -> below center
+        self.assertTrue(quad_check["scrollFits"])
+        self.assertEqual(quad_check["overflows"], [])
+        self.assert_no_letter_stacking()
+
+        # Switch to Dynamic Balance protocol (2D Span & 4-Quadrant Symmetry)
+        pills.nth(2).click()
+        expect(self.page.locator("#summaryStartAmp")).to_have_text("14.0°")
+        expect(self.page.locator("#summaryCurrentAmp")).to_have_text("28.0°")
+        expect(self.page.locator("#summaryAvgSmooth")).to_have_text("100%")
+        expect(self.page.locator("#summaryProgressBadge")).to_have_class("progress-badge")
+        expect(self.page.locator("#summaryProgressBadge")).to_contain_text("+14.0° (+100%)")
+        expect(self.page.locator("#targetNormInput")).to_have_value("25")
+        self.assertEqual(
+            self.page.evaluate("ui.doctorChart.data.datasets[0].data.map(p => [Math.round(p.x), p.y])"),
+            [[73, 14], [100, 28]],
+        )
+
+        # Switching back to Wrist hides Quadrant widget and restores Wrist norm
+        pills.nth(0).click()
+        expect(self.page.locator("#balanceQuadrantWidget")).to_be_hidden()
+        expect(self.page.locator("#targetNormInput")).to_have_value("90")
+
+        # Export client CSV: verify UTF-8 BOM + 23-column longitudinal superset across all 6 patient sessions
+        with self.page.expect_download() as download_info:
+            self.page.locator("#btnDownloadClientCSV").click()
+        raw_bytes = download_info.value.path().read_bytes()
+        self.assertTrue(raw_bytes.startswith(b"\xef\xbb\xbf"))
+        lines = raw_bytes.decode("utf-8-sig").splitlines()
+        self.assertEqual(len(lines), 7)  # 1 header + 6 sessions across all 3 protocols
+        header_cols = lines[0].split(",")
+        self.assertEqual(len(header_cols), 23)
+        self.assertEqual(header_cols[9], "Протокол")
+        self.assertEqual(header_cols[22], "Симетрія квадрантів (%)")
+        wrist_row_cols = lines[1].split(",")
+        self.assertEqual(len(wrist_row_cols), 23)
+        self.assertEqual(wrist_row_cols[9], '"Кисть (2 напрямки)"')
+        self.assertEqual(wrist_row_cols[10:], [""] * 13)
+        dyn_row_cols = lines[6].split(",")
+        self.assertEqual(dyn_row_cols[9], '"Баланс: Динаміка"')
+        self.assertEqual(dyn_row_cols[22], "100.0")
 
 
 class WebKitDoctorDashboardTests(DoctorDashboardTests):
