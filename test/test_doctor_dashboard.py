@@ -294,6 +294,7 @@ class DoctorDashboardTests(unittest.TestCase):
             ("balanceboard", "BalanceBoardGame"),
             ("cardodge", "CarDodgeGame"),
             ("balance3d", "Balance3DGame"),
+            ("billiards", "BilliardsGame"),
         ]:
             self.page.evaluate("""gameId => {
                 document.getElementById('gameContainer').style.display = 'flex';
@@ -333,10 +334,15 @@ class DoctorDashboardTests(unittest.TestCase):
             game.update(NaN, NaN, engine.input);
             game.update(Infinity, -1, engine.input);
             game.draw(ctx);
+            const lum = (px) => 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2];
             const leftPixel = ctx.getImageData(
                 Math.floor(canvas.width * 0.25), Math.floor(canvas.height * 0.5), 1, 1).data;
             const rightPixel = ctx.getImageData(
                 Math.floor(canvas.width * 0.75), Math.floor(canvas.height * 0.5), 1, 1).data;
+            const skyPixel = ctx.getImageData(
+                Math.floor(canvas.width * 0.25), Math.floor(canvas.height * 0.08), 1, 1).data;
+            const groundPixel = ctx.getImageData(
+                Math.floor(canvas.width * 0.25), Math.floor(canvas.height * 0.90), 1, 1).data;
             const hudScore = document.getElementById('hudScore').textContent;
             const hudState = document.getElementById('hudBotState').textContent;
             const modeValue = document.getElementById('gameInputMode').value;
@@ -345,14 +351,21 @@ class DoctorDashboardTests(unittest.TestCase):
             const movedY = game.dragonY < 0 && Number.isFinite(game.dragonY);
             const signatures = [game.init.length, game.update.length, game.draw.length];
             const scrollFits = document.documentElement.scrollWidth <= innerWidth;
-            engine.stopGame();
-            const cleanedUp = !game.active && game._orientHandler === null
-                && game.particles.length === 0 && game.mountains.length === 0;
             return {
                 signatures, modeValue, hasOption, movedX, movedY,
                 stereoRendered: leftPixel[3] > 0 && rightPixel[3] > 0,
-                hudScore, hudState, scrollFits, cleanedUp
+                skyLum: lum(skyPixel),
+                groundLum: lum(groundPixel),
+                hudScore, hudState, scrollFits
             };
+        }""")
+        artifacts = self.artifacts()
+        self.page.screenshot(path=str(artifacts / f"{self.browser_name}-vrdragon-bright.png"))
+        vrdragon_cleaned = self.page.evaluate("""() => {
+            const game = engine.activeGame;
+            engine.stopGame();
+            return !game.active && game._orientHandler === null
+                && game.particles.length === 0 && game.mountains.length === 0;
         }""")
         self.assertEqual(vrdragon_result["signatures"], [2, 2, 1])
         self.assertEqual(vrdragon_result["modeValue"], "four-direction")
@@ -360,11 +373,13 @@ class DoctorDashboardTests(unittest.TestCase):
         self.assertTrue(vrdragon_result["movedX"])
         self.assertTrue(vrdragon_result["movedY"])
         self.assertTrue(vrdragon_result["stereoRendered"])
+        self.assertGreater(vrdragon_result["skyLum"], 100)
+        self.assertGreater(vrdragon_result["groundLum"], 100)
         self.assertIn("Очки:", vrdragon_result["hudScore"])
         self.assertIn("Кристали:", vrdragon_result["hudScore"])
         self.assertIn("Дистанція:", vrdragon_result["hudState"])
         self.assertTrue(vrdragon_result["scrollFits"])
-        self.assertTrue(vrdragon_result["cleanedUp"])
+        self.assertTrue(vrdragon_cleaned)
 
         axis_audit = self.page.evaluate("""() => {
             const expectedModes = {
@@ -373,7 +388,8 @@ class DoctorDashboardTests(unittest.TestCase):
                 cardodge: {directions: 2, inputMode: '2way'},
                 safecracker: {directions: 2, inputMode: '2way'},
                 balance3d: {directions: 4, inputMode: '4way'},
-                vrdragon: {directions: 4, inputMode: '4way'}
+                vrdragon: {directions: 4, inputMode: '4way'},
+                billiards: {directions: 4, inputMode: '4way'}
             };
             const metadataOk = Object.entries(expectedModes).every(([id, exp]) => {
                 const cls = window.RehabGames[id];
@@ -429,6 +445,220 @@ class DoctorDashboardTests(unittest.TestCase):
         self.assertTrue(axis_audit["lockedVerticalIn2D"])
         self.assertTrue(axis_audit["activeVerticalIn4D"])
         self.assertTrue(axis_audit["zeroAfterInvert"])
+
+    def test_billiards_game_mechanics(self):
+        artifacts = self.artifacts()
+        self.page.set_viewport_size({"width": 1280, "height": 720})
+        self.page.evaluate("""async () => {
+            Object.defineProperty(window, 'devicePixelRatio', {configurable: true, value: 2});
+            const {GameEngine} = await import('/GameEngine.js');
+            window.engine = new GameEngine(state);
+            document.getElementById('gameContainer').style.display = 'flex';
+            engine.setTargetAngles(0, 0);
+            engine.startGame('billiards');
+        }""")
+        self.page.wait_for_function(
+            "window.engine && engine.activeGame && engine.activeGame.constructor.name === 'BilliardsGame'"
+        )
+        setup = self.page.evaluate("""() => {
+            const game = engine.activeGame;
+            const canvas = document.getElementById('mainGameCanvas');
+            const ctx = canvas.getContext('2d');
+            const signatures = [game.init.length, game.update.length, game.draw.length];
+            const modeValue = document.getElementById('gameInputMode').value;
+            const hasOption = !!document.querySelector('#gameSelect option[value="billiards"]');
+            game.update(NaN, NaN, engine.input);
+            game.update(Infinity, -1, engine.input);
+            const cue = game.balls[0];
+            const finiteSafe = Number.isFinite(game.cueAngle)
+                && Number.isFinite(cue.x) && Number.isFinite(cue.y);
+
+            // 1. 4-way aiming with horizontal roll
+            const initialAngle = game.cueAngle;
+            engine.setTargetAngles(18, 0);
+            game.update(18, 0.25, engine.input);
+            const aimedMoved = Math.abs(game.cueAngle - initialAngle) > 0.05;
+
+            // 2. Lean back (pitch < 0) enters charge, locks aim, preserves peak pull
+            const lockedAngle = game.cueAngle;
+            engine.setTargetAngles(22, -20);
+            game.update(22, 0.05, engine.input);
+            const chargedPhase = game.phase;
+            const aimLockedPreserved = game.aimLocked && Math.abs(game.cueAngle - lockedAngle) < 1e-6;
+            const peakPower = game.chargePower;
+            engine.setTargetAngles(0, -8);
+            game.update(0, 0.05, engine.input);
+            const preservedPower = game.chargePower;
+            game.draw(ctx);
+
+            return {
+                signatures, modeValue, hasOption, finiteSafe,
+                aimedMoved, chargedPhase, aimLockedPreserved,
+                peakPower, preservedPower,
+                hudScore: document.getElementById('hudScore').textContent,
+                hudState: document.getElementById('hudBotState').textContent,
+                scrollFits: document.documentElement.scrollWidth <= innerWidth
+            };
+        }""")
+        self.assertEqual(setup["signatures"], [2, 2, 1])
+        self.assertEqual(setup["modeValue"], "four-direction")
+        self.assertTrue(setup["hasOption"])
+        self.assertTrue(setup["finiteSafe"])
+        self.assertTrue(setup["aimedMoved"])
+        self.assertEqual(setup["chargedPhase"], "charge")
+        self.assertTrue(setup["aimLockedPreserved"])
+        self.assertGreater(setup["peakPower"], 0.35)
+        self.assertGreaterEqual(setup["preservedPower"], setup["peakPower"] - 1e-6)
+        self.assertIn("Очки:", setup["hudScore"])
+        self.assertIn("Рівень:", setup["hudScore"])
+        self.assertIn("Замах:", setup["hudState"])
+        self.assertTrue(setup["scrollFits"])
+        self.page.screenshot(path=str(artifacts / f"{self.browser_name}-billiards-1280.png"))
+
+        gameplay = self.page.evaluate("""() => {
+            const game = engine.activeGame;
+            // Neutral cancel after 1.35s
+            engine.setTargetAngles(0, 0);
+            for (let i = 0; i < 15; i++) game.update(0, 0.1, engine.input);
+            const cancelledPhase = game.phase;
+            const cancelledPower = game.chargePower;
+
+            // Charge then lean forward (pitch > 0) to strike -> rolling
+            engine.setTargetAngles(0, -18);
+            game.update(0, 0.05, engine.input);
+            engine.setTargetAngles(0, 15);
+            game.update(0, 0.02, engine.input);
+            const strikePhase = game.phase;
+            for (let i = 0; i < 10 && game.phase === 'strike'; i++) game.update(0, 0.03, engine.input);
+            const rollingPhase = game.phase;
+            const cueSpeed = Math.hypot(game.balls[0].vx, game.balls[0].vy);
+
+            // Real collision & pocketing + cue scratch respawn
+            game.balls.forEach((b, idx) => {
+                b.vx = 0;
+                b.vy = 0;
+                if (idx > 2) b.pocketed = true;
+            });
+            const cue = game.balls[0];
+            const obj = game.balls[1];
+            const backup = game.balls[2];
+            backup.pocketed = false;
+            backup.x = 200;
+            backup.y = 350;
+            obj.pocketed = false;
+            obj.x = 950;
+            obj.y = 50;
+            cue.pocketed = false;
+            cue.x = 918;
+            cue.y = 82;
+            cue.vx = 450;
+            cue.vy = -450;
+            game.phase = 'rolling';
+            for (let i = 0; i < 60 && !obj.pocketed; i++) game.update(0, 0.016, engine.input);
+            for (let i = 0; i < 60 && game.phase === 'rolling'; i++) game.update(0, 0.03, engine.input);
+            const objPocketed = obj.pocketed;
+            const scoreAfterPot = game.score;
+
+            // Force scratch into top-left corner pocket
+            cue.x = 38;
+            cue.y = 38;
+            cue.vx = -220;
+            cue.vy = -220;
+            game.phase = 'rolling';
+            for (let i = 0; i < 200 && game.phase === 'rolling'; i++) game.update(0, 0.03, engine.input);
+            const cueRespawned = !cue.pocketed && Number.isFinite(cue.x) && Number.isFinite(cue.y);
+
+            // Runtime toggle to two-direction mode (pitch ignored, dwell locks, sideways fires)
+            const selector = document.getElementById('gameInputMode');
+            selector.value = 'two-direction';
+            selector.dispatchEvent(new Event('change', {bubbles: true}));
+            engine.setTargetAngles(0, -25);
+            game.update(0, 0.05, engine.input);
+            const ignoredPitchIn2D = game.phase === 'aim';
+            engine.setTargetAngles(0, 0);
+            for (let i = 0; i < 12; i++) game.update(0, 0.1, engine.input);
+            const dwellEnteredCharge = game.phase === 'charge';
+            for (let i = 0; i < 4; i++) game.update(0, 0.1, engine.input);
+            engine.setTargetAngles(18, 0);
+            game.update(18, 0.02, engine.input);
+            const fired2D = game.phase === 'strike' || game.phase === 'rolling';
+
+            // Switch back to 4-way & test VS Bot pill + Reset pill
+            selector.value = 'four-direction';
+            selector.dispatchEvent(new Event('change', {bubbles: true}));
+            for (let i = 0; i < 200 && game.phase !== 'aim'; i++) game.update(0, 0.05, engine.input);
+            document.querySelector('[data-billiards-action="mode-bot"]').click();
+            const botModeSet = game.gameMode === 'bot';
+            const botHudText = document.getElementById('hudScore').textContent;
+
+            // Player misses -> turn passes to bot_aim -> bot shoots
+            cue.vx = 40;
+            cue.vy = 0;
+            game.pocketedThisTurn = [];
+            game.scratchedThisTurn = false;
+            game.phase = 'rolling';
+            for (let i = 0; i < 60 && game.phase === 'rolling'; i++) game.update(0, 0.03, engine.input);
+            const botTookTurn = game.phase === 'bot_aim';
+            for (let i = 0; i < 80 && game.phase === 'bot_aim'; i++) game.update(0, 0.05, engine.input);
+            const botShotFired = game.phase === 'strike' || game.phase === 'rolling';
+
+            document.querySelector('[data-billiards-action="reset-rack"]').click();
+            const resetOk = game.score === 0 && game.botScore === 0 && game.level === 1;
+
+            return {
+                cancelledPhase, cancelledPower, strikePhase, rollingPhase, cueSpeed,
+                objPocketed, scoreAfterPot, cueRespawned,
+                ignoredPitchIn2D, dwellEnteredCharge, fired2D,
+                botModeSet, botHudText, botTookTurn, botShotFired, resetOk
+            };
+        }""")
+        self.assertEqual(gameplay["cancelledPhase"], "aim")
+        self.assertEqual(gameplay["cancelledPower"], 0)
+        self.assertEqual(gameplay["strikePhase"], "strike")
+        self.assertEqual(gameplay["rollingPhase"], "rolling")
+        self.assertGreater(gameplay["cueSpeed"], 200)
+        self.assertTrue(gameplay["objPocketed"])
+        self.assertGreater(gameplay["scoreAfterPot"], 0)
+        self.assertTrue(gameplay["cueRespawned"])
+        self.assertTrue(gameplay["ignoredPitchIn2D"])
+        self.assertTrue(gameplay["dwellEnteredCharge"])
+        self.assertTrue(gameplay["fired2D"])
+        self.assertTrue(gameplay["botModeSet"])
+        self.assertIn("Ви:", gameplay["botHudText"])
+        self.assertIn("Бот:", gameplay["botHudText"])
+        self.assertTrue(gameplay["botTookTurn"])
+        self.assertTrue(gameplay["botShotFired"])
+        self.assertTrue(gameplay["resetOk"])
+
+        # Portrait mobile viewport check + screenshot + stop cleanup
+        self.page.set_viewport_size({"width": 320, "height": 700})
+        mobile = self.page.evaluate("""() => {
+            const game = engine.activeGame;
+            window.dispatchEvent(new Event('resize'));
+            engine.setTargetAngles(0, -16);
+            game.update(0, 0.05, engine.input);
+            game.draw(document.getElementById('mainGameCanvas').getContext('2d'));
+            const bar = document.getElementById('billiardsControlsBar').getBoundingClientRect();
+            return {
+                isPortrait: game.view.isPortrait,
+                scrollFits: document.documentElement.scrollWidth <= innerWidth,
+                barFits: bar.left >= -1 && bar.right <= innerWidth + 1
+            };
+        }""")
+        self.assertTrue(mobile["isPortrait"])
+        self.assertTrue(mobile["scrollFits"])
+        self.assertTrue(mobile["barFits"])
+        self.page.screenshot(path=str(artifacts / f"{self.browser_name}-billiards-320.png"))
+
+        cleaned = self.page.evaluate("""() => {
+            const game = engine.activeGame;
+            engine.stopGame();
+            return !game.active
+                && game._uiClickHandler === null
+                && document.getElementById('custom-game-ui').innerHTML === ''
+                && game.balls.length === 0;
+        }""")
+        self.assertTrue(cleaned)
 
 
     def assert_no_letter_stacking(self):
