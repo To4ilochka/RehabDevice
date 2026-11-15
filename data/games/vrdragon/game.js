@@ -655,25 +655,25 @@ class VRDragonGame {
 
     _drawSky(ctx, ox, oy, vw, vh, cy) {
         const g = ctx.createLinearGradient(ox, oy + cy * 0.5, ox, oy + vh);
-        g.addColorStop(0, "#0b0d2a");
-        g.addColorStop(0.15, "#141852");
-        g.addColorStop(0.35, "#1e3a6e");
-        g.addColorStop(0.55, "#2d6a9f");
-        g.addColorStop(0.75, "#4a9ec4");
-        g.addColorStop(0.9, "#7ecce5");
-        g.addColorStop(1, "#aee8f5");
+        g.addColorStop(0, "#1ca7ec");
+        g.addColorStop(0.15, "#42c6ff");
+        g.addColorStop(0.32, "#87e4ff");
+        g.addColorStop(0.5, "#c5f6ff");
+        g.addColorStop(0.7, "#e6fcf5");
+        g.addColorStop(0.88, "#fff7cc");
+        g.addColorStop(1, "#ffeb99");
         ctx.fillStyle = g;
         ctx.fillRect(ox, oy, vw, vh);
 
         ctx.save();
-        ctx.globalAlpha = 0.07;
+        ctx.globalAlpha = 0.22;
         ctx.globalCompositeOperation = "screen";
         for (let i = 0; i < 2; i++) {
-            const ag = ctx.createLinearGradient(ox, oy + vh * 0.05, ox, oy + vh * 0.25);
-            const hue = 160 + i * 50 + Math.sin(this.rainbowPhase + i * 2) * 30;
-            ag.addColorStop(0, `hsla(${hue}, 90%, 65%, 0)`);
-            ag.addColorStop(0.5, `hsla(${hue}, 90%, 65%, 0.7)`);
-            ag.addColorStop(1, `hsla(${hue}, 90%, 65%, 0)`);
+            const ag = ctx.createLinearGradient(ox, oy + vh * 0.04, ox, oy + vh * 0.28);
+            const hue = 42 + i * 130 + Math.sin(this.rainbowPhase + i * 2) * 25;
+            ag.addColorStop(0, `hsla(${hue}, 95%, 80%, 0)`);
+            ag.addColorStop(0.5, `hsla(${hue}, 95%, 82%, 0.85)`);
+            ag.addColorStop(1, `hsla(${hue}, 95%, 80%, 0)`);
             ctx.fillStyle = ag;
             ctx.beginPath();
             ctx.moveTo(ox, oy + vh * 0.08);
@@ -695,10 +695,10 @@ class VRDragonGame {
         for (const s of this.stars) {
             const p = this._proj(s.x, s.y + 1.2, this.worldZ + s.z, vw, vh, cx, cy);
             if (p.x < 0 || p.x > vw) continue;
-            const tw = 0.4 + 0.6 * Math.sin(t + s.twinkle);
-            ctx.fillStyle = `rgba(255,255,255,${tw * 0.7})`;
+            const tw = 0.45 + 0.55 * Math.sin(t + s.twinkle);
+            ctx.fillStyle = `rgba(255, 250, 210, ${tw * 0.75})`;
             ctx.beginPath();
-            ctx.arc(ox + p.x, oy + p.y, Math.max(0.5, s.size * p.s * 3), 0, Math.PI * 2);
+            ctx.arc(ox + p.x, oy + p.y, Math.max(0.6, s.size * p.s * 3.2), 0, Math.PI * 2);
             ctx.fill();
         }
     }
@@ -706,21 +706,21 @@ class VRDragonGame {
     _drawSun(ctx, ox, oy, vw, vh, cx, cy) {
         const sunX = ox + vw * 0.7 + cx * 0.3;
         const sunY = oy + vh * 0.12 + cy * 0.2;
-        const sunR = Math.max(2, Math.min(vw, vh) * 0.06);
+        const sunR = Math.max(4, Math.min(vw, vh) * 0.075);
 
         for (let i = 3; i >= 0; i--) {
-            const r = sunR * (1 + i * 0.8);
-            const alpha = 0.04 - i * 0.008;
-            ctx.fillStyle = `rgba(255, 200, 50, ${alpha})`;
+            const r = sunR * (1 + i * 0.85);
+            const alpha = 0.14 - i * 0.025;
+            ctx.fillStyle = `rgba(255, 220, 90, ${alpha})`;
             ctx.beginPath();
             ctx.arc(sunX, sunY, r, 0, Math.PI * 2);
             ctx.fill();
         }
 
         const sg = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR);
-        sg.addColorStop(0, "#fff8e1");
-        sg.addColorStop(0.5, "#ffecb3");
-        sg.addColorStop(1, "rgba(255, 183, 77, 0.3)");
+        sg.addColorStop(0, "#ffffff");
+        sg.addColorStop(0.55, "#fff59d");
+        sg.addColorStop(1, "rgba(255, 202, 40, 0.45)");
         ctx.fillStyle = sg;
         ctx.beginPath();
         ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
@@ -730,10 +730,25 @@ class VRDragonGame {
     _drawGround(ctx, ox, oy, vw, vh, cx, cy) {
         const horizonY = Math.max(0, Math.min(vh - 1, vh * 0.35 + cy));
         const g = ctx.createLinearGradient(ox, oy + horizonY, ox, oy + vh);
-        g.addColorStop(0, "rgba(15, 45, 25, 0.4)");
-        g.addColorStop(1, "rgba(8, 25, 15, 0.9)");
+        g.addColorStop(0, "rgba(167, 243, 208, 0.85)");
+        g.addColorStop(0.35, "rgba(110, 231, 183, 0.94)");
+        g.addColorStop(0.7, "rgba(74, 222, 128, 0.97)");
+        g.addColorStop(1, "rgba(52, 211, 153, 1)");
         ctx.fillStyle = g;
         ctx.fillRect(ox, oy + horizonY, vw, vh - horizonY);
+
+        ctx.save();
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
+        ctx.lineWidth = 1;
+        for (let lane = -3; lane <= 3; lane++) {
+            const far = this._proj(lane * 0.35, 0, this.worldZ + 22, vw, vh, cx, cy);
+            const near = this._proj(lane * 0.35, 0, this.worldZ + 0.6, vw, vh, cx, cy);
+            ctx.beginPath();
+            ctx.moveTo(ox + far.x, oy + Math.max(horizonY, far.y));
+            ctx.lineTo(ox + near.x, oy + Math.max(horizonY, near.y));
+            ctx.stroke();
+        }
+        ctx.restore();
     }
 
     _drawMtns(ctx, ox, oy, vw, vh, cx, cy) {
@@ -749,8 +764,8 @@ class VRDragonGame {
 
             ctx.globalAlpha = fog;
             const mg = ctx.createLinearGradient(ox + p.x, oy + p.y - sh, ox + p.x, oy + p.y);
-            mg.addColorStop(0, `hsl(${m.hue}, 35%, 30%)`);
-            mg.addColorStop(1, `hsl(${m.hue}, 25%, 18%)`);
+            mg.addColorStop(0, `hsl(${m.hue}, 58%, 62%)`);
+            mg.addColorStop(1, `hsl(${m.hue}, 48%, 45%)`);
             ctx.fillStyle = mg;
 
             ctx.beginPath();
@@ -763,7 +778,7 @@ class VRDragonGame {
             ctx.fill();
 
             if (m.snow) {
-                ctx.fillStyle = `rgba(230, 240, 255, ${fog * 0.6})`;
+                ctx.fillStyle = `rgba(255, 255, 255, ${fog * 0.88})`;
                 ctx.beginPath();
                 ctx.moveTo(ox + p.x - sw * 0.12, oy + p.y - sh * 0.8);
                 ctx.lineTo(ox + p.x, oy + p.y - sh);
@@ -783,8 +798,8 @@ class VRDragonGame {
             const cw = Math.max(1, c.w * p.s * vw);
             const ch = Math.max(1, c.h * p.s * vh);
             const fog = Math.max(0, 1 - rz * 0.05);
-            ctx.globalAlpha = c.op * fog;
-            ctx.fillStyle = "#e8edf5";
+            ctx.globalAlpha = Math.min(0.92, (c.op + 0.42) * fog);
+            ctx.fillStyle = "#ffffff";
             ctx.beginPath();
             ctx.ellipse(ox + p.x, oy + p.y, cw, ch, 0, 0, Math.PI * 2);
             ctx.fill();
@@ -802,19 +817,19 @@ class VRDragonGame {
             if (rz < 0 || rz > 18) continue;
             const p = this._proj(r.x, 0.3 + (r.y || 0) * 0.2, r.z, vw, vh, cx, cy);
             const rs = Math.max(1, r.size * p.s * vw);
-            const fog = Math.max(0.2, 1 - rz * 0.03);
+            const fog = Math.max(0.25, 1 - rz * 0.03);
 
             ctx.save();
             ctx.globalAlpha = fog;
-            ctx.strokeStyle = "#FFD700";
-            ctx.lineWidth = Math.max(2, rs * 0.1);
+            ctx.strokeStyle = "#FF8F00";
+            ctx.lineWidth = Math.max(3, rs * 0.14);
             ctx.shadowBlur = rs * 0.5;
             ctx.shadowColor = "#FFD700";
             ctx.beginPath();
             ctx.ellipse(ox + p.x, oy + p.y, rs, rs * 0.6, 0, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.strokeStyle = "#FFA000";
-            ctx.lineWidth = Math.max(1, rs * 0.05);
+            ctx.strokeStyle = "#FFE57F";
+            ctx.lineWidth = Math.max(1.5, rs * 0.07);
             ctx.beginPath();
             ctx.ellipse(ox + p.x, oy + p.y, rs * 0.85, rs * 0.5, 0, 0, Math.PI * 2);
             ctx.stroke();
@@ -878,6 +893,9 @@ class VRDragonGame {
             ctx.lineTo(ox + p.x - cs * 0.7, oy + p.y);
             ctx.closePath();
             ctx.fill();
+            ctx.strokeStyle = "#0369a1";
+            ctx.lineWidth = Math.max(1, cs * 0.12);
+            ctx.stroke();
 
             ctx.fillStyle = "rgba(255,255,255,0.6)";
             ctx.beginPath();
@@ -1107,7 +1125,7 @@ class VRDragonGame {
         const barX = ox + (vw - barW) / 2;
         const barY = oy + 8;
 
-        ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+        ctx.fillStyle = "rgba(10, 22, 42, 0.62)";
         if (typeof ctx.roundRect === "function") {
             ctx.beginPath();
             ctx.roundRect(barX, barY, barW, fs + 10, 6);
@@ -1132,10 +1150,21 @@ class VRDragonGame {
         ctx.fillText(hearts, barX + barW - 6, barY + fs + 3);
 
         const dist = Math.floor(this.distanceTraveled);
+        const distLabel = `${dist} м | Шв. x${this.speed.toFixed(1)}`;
+        const distFontSize = Math.max(8, Math.min(10, vw * 0.035));
+        ctx.font = `600 ${distFontSize}px sans-serif`;
+        const distW = Math.min(vw * 0.65, ctx.measureText(distLabel).width + 16);
+        ctx.fillStyle = "rgba(10, 22, 42, 0.52)";
+        if (typeof ctx.roundRect === "function") {
+            ctx.beginPath();
+            ctx.roundRect(ox + (vw - distW) / 2, oy + vh - distFontSize - 13, distW, distFontSize + 9, 6);
+            ctx.fill();
+        } else {
+            ctx.fillRect(ox + (vw - distW) / 2, oy + vh - distFontSize - 13, distW, distFontSize + 9);
+        }
         ctx.textAlign = "center";
-        ctx.fillStyle = "rgba(255,255,255,0.6)";
-        ctx.font = `${Math.max(8, Math.min(10, vw * 0.035))}px sans-serif`;
-        ctx.fillText(`${dist} м | Шв. x${this.speed.toFixed(1)}`, ox + vw / 2, oy + vh - 8);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+        ctx.fillText(distLabel, ox + vw / 2, oy + vh - 8);
         ctx.restore();
     }
 
