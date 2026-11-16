@@ -51,11 +51,15 @@
 #define ANALYTICS_HOLD_TOLERANCE_DEG      3.5f
 // Maximum angular velocity (deg/s) below which wrist is considered holding at extreme point
 #define ANALYTICS_HOLD_MAX_SPEED_DEG_S    6.0f
+// Planar tilt radius (deg) defining the neutral stability hold cone in 4-way balance modes
+#define BALANCE_NEUTRAL_RADIUS_DEG        5.0f
+// Minimum planar tilt radius (deg) required before attributing time to a directional quadrant
+#define BALANCE_QUADRANT_DEADZONE_DEG     1.5f
 
 // ============================================================================
 // LITTLEFS AND STORAGE SETTINGS
 // ============================================================================
-// Minimum free memory reserve (in bytes); older sessions are deleted when below this limit (100 KB)
+// Minimum free memory reserve (in bytes); new LittleFS writes are blocked below this limit (100 KB)
 #define FS_MIN_FREE_BYTES                 (100 * 1024)
 // Directory for storing per-patient session files (.jsonl)
 #define FS_SESSIONS_DIR                   "/p"

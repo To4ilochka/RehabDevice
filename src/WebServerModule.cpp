@@ -16,6 +16,21 @@ h1{color:#ff4c4c;}</style></head>
 </div></body></html>
 )rawliteral";
 
+static void enqueueSysCommand(const SysCommandMsg& msg) {
+    if (sysCommandQueue == NULL) return;
+    if (xQueueSend(sysCommandQueue, &msg, 0) != pdTRUE) {
+        Serial.printf("[WebServer] WARNING: sysCommandQueue full! Dropped cmd=%d\n", static_cast<int>(msg.cmd));
+    }
+}
+
+static uint8_t parseBoolArgFlags(bool invertX, bool invertY, bool swapAxes) {
+    uint8_t flags = ORIENT_FLAG_NONE;
+    if (invertX) flags |= ORIENT_FLAG_INVERT_X;
+    if (invertY) flags |= ORIENT_FLAG_INVERT_Y;
+    if (swapAxes) flags |= ORIENT_FLAG_SWAP_AXES;
+    return flags;
+}
+
 WebServerModule::WebServerModule(SensorMPU* sensorPtr, AnalyticsEngine* analyticsPtr, WiFiManagerModule* wifiPtr)
     : server(WEB_SERVER_PORT), ws("/ws"), sensor(sensorPtr), analytics(analyticsPtr), wifi(wifiPtr),
       lastStatusBroadcastMs(0), lastStatsBroadcastMs(0), lastCleanupMs(0), sendInitialStatusClientId(0) {}
@@ -131,9 +146,11 @@ void WebServerModule::setupRoutes() {
         JsonDocument doc;
         doc["type"] = "status";
         doc["connectedClients"] = wifi->getConnectedClientsCount();
-        doc["usedBytes"] = 0;
-        doc["totalBytes"] = 0;
+        doc["usedBytes"] = dbManager.getUsedBytes();
+        doc["totalBytes"] = dbManager.getTotalBytes();
+        doc["storageLowSpace"] = dbManager.isStorageLowSpace();
         doc["sessionActive"] = active;
+        doc["sessionMode"] = rec.sessionMode;
         doc["patientId"] = rec.patientId;
         doc["angle"] = serialized(String(safeRoll, 2));
         doc["roll"] = safeRoll;
@@ -152,6 +169,9 @@ void WebServerModule::setupRoutes() {
     server.on("/api/sessions", HTTP_GET, [](AsyncWebServerRequest *request) {
         int limit = request->hasArg("limit") ? request->arg("limit").toInt() : 50;
         int offset = request->hasArg("offset") ? request->arg("offset").toInt() : 0;
+        if (limit < 1) limit = 1;
+        if (limit > 200) limit = 200;
+        if (offset < 0) offset = 0;
         
         int arrayCount = dbManager.countSessionsPage(limit, offset);
         
@@ -174,37 +194,70 @@ void WebServerModule::setupRoutes() {
                 settimeofday(&tv, NULL);
             }
         } else if (action == "startSession") {
-            if (request->hasArg("patientId") && sysCommandQueue != NULL) {
+            if (request->hasArg("patientId")) {
                 SysCommandMsg msg = {};
                 msg.cmd = CMD_START_SESSION;
                 strncpy(msg.patientId, request->arg("patientId").c_str(), sizeof(msg.patientId) - 1);
-                xQueueSend(sysCommandQueue, &msg, 0);
+                int modeArg = request->hasArg("sessionMode") ? request->arg("sessionMode").toInt() : 0;
+                msg.sessionMode = (modeArg >= 0 && modeArg <= 2) ? static_cast<uint8_t>(modeArg) : SESSION_MODE_WRIST;
+                if (request->hasArg("invertX") || request->hasArg("invertY") || request->hasArg("swapAxes")) {
+                    const bool invX = request->arg("invertX") == "1" || request->arg("invertX") == "true";
+                    const bool invY = request->arg("invertY") == "1" || request->arg("invertY") == "true";
+                    const bool swap = request->arg("swapAxes") == "1" || request->arg("swapAxes") == "true";
+                    msg.hasOrientation = true;
+                    msg.orientationFlags = parseBoolArgFlags(invX, invY, swap);
+                }
+                if (request->hasArg("tareRoll") && request->hasArg("tarePitch")) {
+                    msg.hasTare = true;
+                    msg.tareRoll = request->arg("tareRoll").toFloat();
+                    msg.tarePitch = request->arg("tarePitch").toFloat();
+                }
+                enqueueSysCommand(msg);
             }
         } else if (action == "stopSession") {
-            if (sysCommandQueue != NULL) {
-                SysCommandMsg msg = {};
-                msg.cmd = CMD_STOP_SESSION;
-                xQueueSend(sysCommandQueue, &msg, 0);
-            }
+            SysCommandMsg msg = {};
+            msg.cmd = CMD_STOP_SESSION;
+            enqueueSysCommand(msg);
         } else if (action == "recalibrate") {
-            if (sysCommandQueue != NULL) {
+            SysCommandMsg msg = {};
+            msg.cmd = CMD_RECALIBRATE;
+            enqueueSysCommand(msg);
+        } else if (action == "syncOrientation") {
+            SysCommandMsg msg = {};
+            msg.cmd = CMD_SYNC_ORIENTATION;
+            const bool invX = request->arg("invertX") == "1" || request->arg("invertX") == "true";
+            const bool invY = request->arg("invertY") == "1" || request->arg("invertY") == "true";
+            const bool swap = request->arg("swapAxes") == "1" || request->arg("swapAxes") == "true";
+            msg.hasOrientation = true;
+            msg.orientationFlags = parseBoolArgFlags(invX, invY, swap);
+            if (request->hasArg("tareRoll") && request->hasArg("tarePitch")) {
+                msg.hasTare = true;
+                msg.tareRoll = request->arg("tareRoll").toFloat();
+                msg.tarePitch = request->arg("tarePitch").toFloat();
+            }
+            enqueueSysCommand(msg);
+        } else if (action == "setTare") {
+            if (request->hasArg("tareRoll") && request->hasArg("tarePitch")) {
                 SysCommandMsg msg = {};
-                msg.cmd = CMD_RECALIBRATE;
-                xQueueSend(sysCommandQueue, &msg, 0);
+                msg.cmd = CMD_SET_TARE;
+                msg.hasTare = true;
+                msg.tareRoll = request->arg("tareRoll").toFloat();
+                msg.tarePitch = request->arg("tarePitch").toFloat();
+                enqueueSysCommand(msg);
             }
         } else if (action == "deletePatient") {
-            if (request->hasArg("patientId") && sysCommandQueue != NULL) {
+            if (request->hasArg("patientId")) {
                 SysCommandMsg msg = {};
                 msg.cmd = CMD_DELETE_PATIENT;
                 strncpy(msg.patientId, request->arg("patientId").c_str(), sizeof(msg.patientId) - 1);
-                xQueueSend(sysCommandQueue, &msg, 0);
+                enqueueSysCommand(msg);
             }
         } else if (action == "deleteSession") {
-            if (request->hasArg("id") && sysCommandQueue != NULL) {
+            if (request->hasArg("id")) {
                 SysCommandMsg msg = {};
                 msg.cmd = CMD_DELETE_SESSION;
                 msg.sessionId = request->arg("id").toInt();
-                xQueueSend(sysCommandQueue, &msg, 0);
+                enqueueSysCommand(msg);
             }
         } else if (action == "reboot") {
             request->send(200, "application/json", "{\"ok\":true}");
@@ -264,39 +317,72 @@ void WebServerModule::handleWebSocketMessage(AsyncWebSocketClient* client, uint8
         }
     } else if (cmd == "startSession") {
         const char* patientId = doc["patientId"].as<const char*>();
-        if (patientId && sysCommandQueue != NULL) {
+        if (patientId) {
             SysCommandMsg msg = {};
             msg.cmd = CMD_START_SESSION;
             strncpy(msg.patientId, patientId, sizeof(msg.patientId) - 1);
-            xQueueSend(sysCommandQueue, &msg, 0);
+            int modeVal = doc["sessionMode"] | 0;
+            msg.sessionMode = (modeVal >= 0 && modeVal <= 2) ? static_cast<uint8_t>(modeVal) : SESSION_MODE_WRIST;
+            if (!doc["invertX"].isNull() || !doc["invertY"].isNull() || !doc["swapAxes"].isNull()) {
+                msg.hasOrientation = true;
+                msg.orientationFlags = parseBoolArgFlags(
+                    doc["invertX"] | false,
+                    doc["invertY"] | false,
+                    doc["swapAxes"] | false
+                );
+            }
+            if (!doc["tareRoll"].isNull() && !doc["tarePitch"].isNull()) {
+                msg.hasTare = true;
+                msg.tareRoll = doc["tareRoll"].as<float>();
+                msg.tarePitch = doc["tarePitch"].as<float>();
+            }
+            enqueueSysCommand(msg);
         }
     } else if (cmd == "stopSession") {
-        if (sysCommandQueue != NULL) {
-            SysCommandMsg msg = {};
-            msg.cmd = CMD_STOP_SESSION;
-            xQueueSend(sysCommandQueue, &msg, 0);
-        }
+        SysCommandMsg msg = {};
+        msg.cmd = CMD_STOP_SESSION;
+        enqueueSysCommand(msg);
     } else if (cmd == "recalibrate") {
-        if (sysCommandQueue != NULL) {
+        SysCommandMsg msg = {};
+        msg.cmd = CMD_RECALIBRATE;
+        enqueueSysCommand(msg);
+    } else if (cmd == "syncOrientation") {
+        SysCommandMsg msg = {};
+        msg.cmd = CMD_SYNC_ORIENTATION;
+        msg.hasOrientation = true;
+        msg.orientationFlags = parseBoolArgFlags(
+            doc["invertX"] | false,
+            doc["invertY"] | false,
+            doc["swapAxes"] | false
+        );
+        if (!doc["tareRoll"].isNull() && !doc["tarePitch"].isNull()) {
+            msg.hasTare = true;
+            msg.tareRoll = doc["tareRoll"].as<float>();
+            msg.tarePitch = doc["tarePitch"].as<float>();
+        }
+        enqueueSysCommand(msg);
+    } else if (cmd == "setTare") {
+        if (!doc["tareRoll"].isNull() && !doc["tarePitch"].isNull()) {
             SysCommandMsg msg = {};
-            msg.cmd = CMD_RECALIBRATE;
-            xQueueSend(sysCommandQueue, &msg, 0);
+            msg.cmd = CMD_SET_TARE;
+            msg.hasTare = true;
+            msg.tareRoll = doc["tareRoll"].as<float>();
+            msg.tarePitch = doc["tarePitch"].as<float>();
+            enqueueSysCommand(msg);
         }
     } else if (cmd == "deletePatient") {
         const char* patientId = doc["patientId"].as<const char*>();
-        if (patientId && sysCommandQueue != NULL) {
+        if (patientId) {
             SysCommandMsg msg = {};
             msg.cmd = CMD_DELETE_PATIENT;
             strncpy(msg.patientId, patientId, sizeof(msg.patientId) - 1);
-            xQueueSend(sysCommandQueue, &msg, 0);
+            enqueueSysCommand(msg);
         }
     } else if (cmd == "deleteSession") {
-        if (sysCommandQueue != NULL) {
-            SysCommandMsg msg = {};
-            msg.cmd = CMD_DELETE_SESSION;
-            msg.sessionId = doc["id"].as<int>();
-            xQueueSend(sysCommandQueue, &msg, 0);
-        }
+        SysCommandMsg msg = {};
+        msg.cmd = CMD_DELETE_SESSION;
+        msg.sessionId = doc["id"].as<int>();
+        enqueueSysCommand(msg);
     }
 }
 
@@ -328,9 +414,11 @@ void WebServerModule::broadcastStatus() {
     JsonDocument doc;
     doc["type"] = "status";
     doc["connectedClients"] = wifi->getConnectedClientsCount();
-    doc["usedBytes"] = 0;
-    doc["totalBytes"] = 0;
+    doc["usedBytes"] = dbManager.getUsedBytes();
+    doc["totalBytes"] = dbManager.getTotalBytes();
+    doc["storageLowSpace"] = dbManager.isStorageLowSpace();
     doc["sessionActive"] = active;
+    doc["sessionMode"] = rec.sessionMode;
     doc["patientId"] = rec.patientId;
     doc["sdAvailable"] = dbManager.isSDAvailable();
     doc["version"] = FIRMWARE_VERSION;
@@ -352,7 +440,6 @@ void WebServerModule::broadcastLiveStats() {
     lastStatsBroadcastMs = now;
 
     String liveJson = analytics->getLiveStatsJSON();
-    liveJson.replace("{\"active\"", "{\"type\":\"liveStats\",\"active\"");
     
     for (auto& client : ws.getClients()) {
         if (client.status() == WS_CONNECTED && client.canSend()) {
@@ -383,9 +470,11 @@ void WebServerModule::sendStatusToClient(AsyncWebSocketClient* client) {
     JsonDocument doc;
     doc["type"] = "status";
     doc["connectedClients"] = wifi->getConnectedClientsCount();
-    doc["usedBytes"] = 0;
-    doc["totalBytes"] = 0;
+    doc["usedBytes"] = dbManager.getUsedBytes();
+    doc["totalBytes"] = dbManager.getTotalBytes();
+    doc["storageLowSpace"] = dbManager.isStorageLowSpace();
     doc["sessionActive"] = active;
+    doc["sessionMode"] = rec.sessionMode;
     doc["patientId"] = rec.patientId;
     doc["sdAvailable"] = dbManager.isSDAvailable();
     doc["version"] = FIRMWARE_VERSION;

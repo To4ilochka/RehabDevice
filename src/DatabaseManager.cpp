@@ -1,5 +1,6 @@
 #include "DatabaseManager.h"
 #include <ArduinoJson.h>
+#include <string.h>
 
 DatabaseManager dbManager;
 QueueHandle_t dbQueue = NULL;
@@ -16,14 +17,51 @@ const char* create_table_sql =
     "avg_speed REAL, "
     "smoothness REAL, "
     "flexions_count INTEGER, "
-    "session_duration REAL"
+    "session_duration REAL, "
+    "session_mode INTEGER DEFAULT 0, "
+    "min_pitch REAL, "
+    "max_pitch REAL, "
+    "mean_roll REAL, "
+    "mean_pitch REAL, "
+    "sway_rms REAL, "
+    "ml_rms REAL, "
+    "ap_rms REAL, "
+    "stability_pct REAL, "
+    "q_fl REAL, "
+    "q_fr REAL, "
+    "q_bl REAL, "
+    "q_br REAL"
     ");";
+
+struct SchemaColumnDef {
+    const char* name;
+    const char* ddl;
+};
+
+static const SchemaColumnDef kExtendedColumns[] = {
+    {"session_mode",  "INTEGER DEFAULT 0"},
+    {"min_pitch",     "REAL"},
+    {"max_pitch",     "REAL"},
+    {"mean_roll",     "REAL"},
+    {"mean_pitch",    "REAL"},
+    {"sway_rms",      "REAL"},
+    {"ml_rms",        "REAL"},
+    {"ap_rms",        "REAL"},
+    {"stability_pct", "REAL"},
+    {"q_fl",          "REAL"},
+    {"q_fr",          "REAL"},
+    {"q_bl",          "REAL"},
+    {"q_br",          "REAL"}
+};
 
 DatabaseManager::DatabaseManager() {
     db = nullptr;
     usingSD = false;
     dbPathSD = "/sd/rehab.db";
     dbPathFS = "/littlefs/rehab.db";
+    cachedUsedBytes = 0;
+    cachedTotalBytes = 0;
+    cachedLowSpace = false;
     dbMutex = xSemaphoreCreateMutex();
     if (dbMutex == nullptr) {
         Serial.println("[DatabaseManager] FATAL: Failed to create db mutex!");
@@ -35,6 +73,34 @@ DatabaseManager::~DatabaseManager() {
     if (dbMutex != nullptr) {
         vSemaphoreDelete(dbMutex);
     }
+}
+
+void DatabaseManager::refreshStorageStats() {
+    if (usingSD) {
+        __atomic_store_n(&cachedUsedBytes, 0U, __ATOMIC_RELAXED);
+        __atomic_store_n(&cachedTotalBytes, 0U, __ATOMIC_RELAXED);
+        __atomic_store_n(&cachedLowSpace, false, __ATOMIC_RELAXED);
+        return;
+    }
+    const size_t total = LittleFS.totalBytes();
+    const size_t used = LittleFS.usedBytes();
+    const size_t freeBytes = (total > used) ? (total - used) : 0;
+    const bool low = (total > 0) && (freeBytes < static_cast<size_t>(FS_MIN_FREE_BYTES));
+    __atomic_store_n(&cachedUsedBytes, static_cast<uint32_t>(used), __ATOMIC_RELAXED);
+    __atomic_store_n(&cachedTotalBytes, static_cast<uint32_t>(total), __ATOMIC_RELAXED);
+    __atomic_store_n(&cachedLowSpace, low, __ATOMIC_RELAXED);
+}
+
+uint32_t DatabaseManager::getUsedBytes() const {
+    return __atomic_load_n(&cachedUsedBytes, __ATOMIC_RELAXED);
+}
+
+uint32_t DatabaseManager::getTotalBytes() const {
+    return __atomic_load_n(&cachedTotalBytes, __ATOMIC_RELAXED);
+}
+
+bool DatabaseManager::isStorageLowSpace() const {
+    return __atomic_load_n(&cachedLowSpace, __ATOMIC_RELAXED);
 }
 
 bool DatabaseManager::init(bool useSD) {
@@ -59,6 +125,7 @@ bool DatabaseManager::init(bool useSD) {
     int rc = sqlite3_open(activePath, &db);
     if (rc != SQLITE_OK) {
         Serial.printf("[DatabaseManager] Failed to open database at %s: %s\n", activePath, sqlite3_errmsg(db));
+        refreshStorageStats();
         return false;
     }
 
@@ -67,17 +134,65 @@ bool DatabaseManager::init(bool useSD) {
     
     Serial.printf("[DatabaseManager] Database opened at %s\n", activePath);
 
-    // Create tables if they don't exist
+    // Create tables and run idempotent column migrations if needed
     if (!createTables()) {
+        refreshStorageStats();
         return false;
     }
 
+    refreshStorageStats();
+    return true;
+}
+
+bool DatabaseManager::hasColumn(sqlite3* handle, const char* schemaName, const char* columnName) {
+    if (!handle || !schemaName || !columnName) return false;
+    char pragmaSql[96];
+    snprintf(pragmaSql, sizeof(pragmaSql), "PRAGMA %s.table_info(sessions);", schemaName);
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(handle, pragmaSql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+
+    bool found = false;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char* colText = sqlite3_column_text(stmt, 1);
+        if (colText && strcmp(reinterpret_cast<const char*>(colText), columnName) == 0) {
+            found = true;
+            break;
+        }
+    }
+    sqlite3_finalize(stmt);
+    return found;
+}
+
+bool DatabaseManager::ensureSchemaColumns(sqlite3* handle, const char* schemaName) {
+    if (!handle || !schemaName) return false;
+    const size_t count = sizeof(kExtendedColumns) / sizeof(kExtendedColumns[0]);
+    for (size_t i = 0; i < count; i++) {
+        if (!hasColumn(handle, schemaName, kExtendedColumns[i].name)) {
+            char alterSql[160];
+            snprintf(alterSql, sizeof(alterSql), "ALTER TABLE %s.sessions ADD COLUMN %s %s;",
+                     schemaName, kExtendedColumns[i].name, kExtendedColumns[i].ddl);
+            char* zErrMsg = nullptr;
+            int rc = sqlite3_exec(handle, alterSql, nullptr, nullptr, &zErrMsg);
+            if (rc != SQLITE_OK) {
+                Serial.printf("[DatabaseManager] Schema migration failed (%s): %s\n",
+                              kExtendedColumns[i].name, zErrMsg ? zErrMsg : "unknown");
+                if (zErrMsg) sqlite3_free(zErrMsg);
+                return false;
+            }
+            Serial.printf("[DatabaseManager] Migrated column '%s' on %s.sessions\n",
+                          kExtendedColumns[i].name, schemaName);
+        }
+    }
     return true;
 }
 
 bool DatabaseManager::createTables() {
     if (!db) return false;
-    return execQuery(create_table_sql);
+    if (!execQuery(create_table_sql)) return false;
+    return ensureSchemaColumns(db, "main");
 }
 
 bool DatabaseManager::execQuery(const char* sql) {
@@ -100,18 +215,23 @@ bool DatabaseManager::mergeAndCleanupLittleFS() {
     Serial.println("[DatabaseManager] Found existing db on LittleFS. Starting migration to SD...");
 
     // Open the SD database
-    sqlite3* sd_db;
+    sqlite3* sd_db = nullptr;
     if (sqlite3_open(dbPathSD, &sd_db) != SQLITE_OK) {
         Serial.println("[DatabaseManager] Could not open SD db for migration.");
+        if (sd_db) sqlite3_close(sd_db);
         return false;
     }
 
-    // Ensure table exists on SD before inserting
+    // Ensure full current schema exists on SD before inserting
     char* zErrMsg = 0;
     sqlite3_exec(sd_db, create_table_sql, NULL, 0, &zErrMsg);
-    if (zErrMsg) sqlite3_free(zErrMsg);
+    if (zErrMsg) {
+        sqlite3_free(zErrMsg);
+        zErrMsg = 0;
+    }
+    ensureSchemaColumns(sd_db, "main");
 
-    // ATTACH LittleFS db
+    // ATTACH LittleFS db (read-only inspection avoids SQLITE_FULL if LittleFS was near capacity)
     const char* attach_sql = "ATTACH DATABASE '/littlefs/rehab.db' AS fs_db;";
     if (sqlite3_exec(sd_db, attach_sql, NULL, 0, &zErrMsg) != SQLITE_OK) {
         Serial.printf("[DatabaseManager] Failed to attach fs_db: %s\n", zErrMsg);
@@ -120,13 +240,22 @@ bool DatabaseManager::mergeAndCleanupLittleFS() {
         return false;
     }
 
+    const bool fsHasExtendedSchema = hasColumn(sd_db, "fs_db", "session_mode") && hasColumn(sd_db, "fs_db", "q_br");
+
     // Use a transaction for safe migration
     sqlite3_exec(sd_db, "BEGIN TRANSACTION;", NULL, 0, NULL);
 
-    const char* copy_sql = "INSERT INTO main.sessions "
-                           "(patient_id, timestamp, date_str, min_angle, max_angle, amplitude, avg_speed, smoothness, flexions_count, session_duration) "
-                           "SELECT patient_id, timestamp, date_str, min_angle, max_angle, amplitude, avg_speed, smoothness, flexions_count, session_duration "
-                           "FROM fs_db.sessions;";
+    const char* copy_sql = fsHasExtendedSchema
+        ? "INSERT INTO main.sessions "
+          "(patient_id, timestamp, date_str, min_angle, max_angle, amplitude, avg_speed, smoothness, flexions_count, session_duration, "
+          "session_mode, min_pitch, max_pitch, mean_roll, mean_pitch, sway_rms, ml_rms, ap_rms, stability_pct, q_fl, q_fr, q_bl, q_br) "
+          "SELECT patient_id, timestamp, date_str, min_angle, max_angle, amplitude, avg_speed, smoothness, flexions_count, session_duration, "
+          "COALESCE(session_mode, 0), min_pitch, max_pitch, mean_roll, mean_pitch, sway_rms, ml_rms, ap_rms, stability_pct, q_fl, q_fr, q_bl, q_br "
+          "FROM fs_db.sessions;"
+        : "INSERT INTO main.sessions "
+          "(patient_id, timestamp, date_str, min_angle, max_angle, amplitude, avg_speed, smoothness, flexions_count, session_duration, session_mode) "
+          "SELECT patient_id, timestamp, date_str, min_angle, max_angle, amplitude, avg_speed, smoothness, flexions_count, session_duration, 0 "
+          "FROM fs_db.sessions;";
                            
     int rc = sqlite3_exec(sd_db, copy_sql, NULL, 0, &zErrMsg);
     if (rc != SQLITE_OK) {
@@ -151,7 +280,10 @@ bool DatabaseManager::mergeAndCleanupLittleFS() {
 
 bool DatabaseManager::saveSession(const SessionRecord& rec) {
     if (dbQueue != NULL) {
-        return xQueueSend(dbQueue, &rec, 0) == pdTRUE;
+        if (xQueueSend(dbQueue, &rec, 0) == pdTRUE) {
+            return true;
+        }
+        Serial.println("[DatabaseManager] WARNING: dbQueue full! Session record dropped.");
     }
     return false;
 }
@@ -159,18 +291,29 @@ bool DatabaseManager::saveSession(const SessionRecord& rec) {
 bool DatabaseManager::saveSessionDb(const SessionRecord& rec) {
     if (!db) return false;
 
-    const char* sql = "INSERT INTO sessions (patient_id, timestamp, date_str, min_angle, max_angle, amplitude, avg_speed, smoothness, flexions_count, session_duration) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+    if (!usingSD) {
+        refreshStorageStats();
+        if (isStorageLowSpace()) {
+            Serial.println("[DatabaseManager] ERROR: LittleFS free space below 100 KiB reserve; refusing write to protect existing records. Insert SD card.");
+            return false;
+        }
+    }
+
+    const char* sql =
+        "INSERT INTO sessions ("
+        "patient_id, timestamp, date_str, min_angle, max_angle, amplitude, avg_speed, smoothness, flexions_count, session_duration, "
+        "session_mode, min_pitch, max_pitch, mean_roll, mean_pitch, sway_rms, ml_rms, ap_rms, stability_pct, q_fl, q_fr, q_bl, q_br"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
     
     int maxRetries = 3;
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
         xSemaphoreTake(dbMutex, portMAX_DELAY);
-        sqlite3_stmt* stmt;
+        sqlite3_stmt* stmt = nullptr;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
             Serial.printf("[DatabaseManager] Attempt %d: Failed to prepare insert statement: %s\n", attempt, sqlite3_errmsg(db));
             xSemaphoreGive(dbMutex);
             vTaskDelay(pdMS_TO_TICKS(100));
-            continue; // try again
+            continue;
         }
 
         sqlite3_bind_text(stmt, 1, rec.patientId, -1, SQLITE_STATIC);
@@ -183,22 +326,44 @@ bool DatabaseManager::saveSessionDb(const SessionRecord& rec) {
         sqlite3_bind_double(stmt, 8, rec.smoothness);
         sqlite3_bind_int(stmt, 9, rec.flexionsCount);
         sqlite3_bind_double(stmt, 10, rec.sessionDuration);
+        sqlite3_bind_int(stmt, 11, rec.sessionMode);
+
+        if (rec.sessionMode == SESSION_MODE_WRIST) {
+            for (int col = 12; col <= 23; col++) {
+                sqlite3_bind_null(stmt, col);
+            }
+        } else {
+            sqlite3_bind_double(stmt, 12, rec.minPitch);
+            sqlite3_bind_double(stmt, 13, rec.maxPitch);
+            sqlite3_bind_double(stmt, 14, rec.meanRoll);
+            sqlite3_bind_double(stmt, 15, rec.meanPitch);
+            sqlite3_bind_double(stmt, 16, rec.swayRms);
+            sqlite3_bind_double(stmt, 17, rec.mlRms);
+            sqlite3_bind_double(stmt, 18, rec.apRms);
+            sqlite3_bind_double(stmt, 19, rec.stabilityPct);
+            sqlite3_bind_double(stmt, 20, rec.qFL);
+            sqlite3_bind_double(stmt, 21, rec.qFR);
+            sqlite3_bind_double(stmt, 22, rec.qBL);
+            sqlite3_bind_double(stmt, 23, rec.qBR);
+        }
 
         int rc = sqlite3_step(stmt);
         sqlite3_finalize(stmt);
         xSemaphoreGive(dbMutex);
 
         if (rc == SQLITE_DONE) {
+            refreshStorageStats();
             Serial.println("[DatabaseManager] Session saved to database.");
             return true;
         }
         
         Serial.printf("[DatabaseManager] Attempt %d failed. SQLITE RC: %d, Error: %s\n", attempt, rc, sqlite3_errmsg(db));
         if (attempt < maxRetries) {
-            vTaskDelay(pdMS_TO_TICKS(150)); // wait before next attempt
+            vTaskDelay(pdMS_TO_TICKS(150));
         }
     }
     
+    refreshStorageStats();
     Serial.println("[DatabaseManager] CRITICAL: Failed to save session after all retries.");
     return false;
 }
@@ -206,17 +371,20 @@ bool DatabaseManager::saveSessionDb(const SessionRecord& rec) {
 sqlite3_stmt* DatabaseManager::prepareSessionsQuery(int limit, int offset) {
     if (!db) return nullptr;
     
-    char sql[512];
+    char sql[768];
     snprintf(sql, sizeof(sql), 
         "SELECT id, patient_id AS patientId, timestamp, date_str AS dateStr, "
         "min_angle AS minAngle, max_angle AS maxAngle, amplitude, "
         "avg_speed AS avgSpeed, smoothness, flexions_count AS flexionsCount, "
-        "session_duration AS sessionDuration "
+        "session_duration AS sessionDuration, COALESCE(session_mode, 0) AS sessionMode, "
+        "min_pitch, max_pitch, mean_roll, mean_pitch, "
+        "sway_rms, ml_rms, ap_rms, stability_pct, "
+        "q_fl, q_fr, q_bl, q_br "
         "FROM sessions ORDER BY timestamp DESC LIMIT %d OFFSET %d;", 
         limit, offset);
     
     xSemaphoreTake(dbMutex, portMAX_DELAY);
-    sqlite3_stmt* stmt;
+    sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         Serial.printf("[DatabaseManager] Failed to prepare statement: %s\n", sqlite3_errmsg(db));
         xSemaphoreGive(dbMutex);
@@ -232,7 +400,7 @@ int DatabaseManager::countSessionsPage(int limit, int offset) {
     snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM (SELECT 1 FROM sessions LIMIT %d OFFSET %d);", limit, offset);
     
     xSemaphoreTake(dbMutex, portMAX_DELAY);
-    sqlite3_stmt* stmt;
+    sqlite3_stmt* stmt = nullptr;
     int count = 0;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -259,6 +427,8 @@ int DatabaseManager::stepSessionRow(sqlite3_stmt* stmt, JsonDocument& doc) {
     if (rc == SQLITE_ROW) {
         const unsigned char* patientText = sqlite3_column_text(stmt, 1);
         const unsigned char* dateText = sqlite3_column_text(stmt, 3);
+        const int mode = sqlite3_column_int(stmt, 11);
+
         doc["id"] = sqlite3_column_int(stmt, 0);
         doc["patientId"] = patientText ? reinterpret_cast<const char*>(patientText) : "";
         doc["timestamp"] = sqlite3_column_int(stmt, 2);
@@ -270,6 +440,23 @@ int DatabaseManager::stepSessionRow(sqlite3_stmt* stmt, JsonDocument& doc) {
         doc["smoothness"] = sqlite3_column_double(stmt, 8);
         doc["flexionsCount"] = sqlite3_column_int(stmt, 9);
         doc["sessionDuration"] = sqlite3_column_double(stmt, 10);
+        doc["sessionMode"] = mode;
+
+        // Sparse MsgPack serialization: emit 4-way balance columns only on balance rows
+        if (mode != SESSION_MODE_WRIST) {
+            doc["minPitch"] = sqlite3_column_double(stmt, 12);
+            doc["maxPitch"] = sqlite3_column_double(stmt, 13);
+            doc["meanRoll"] = sqlite3_column_double(stmt, 14);
+            doc["meanPitch"] = sqlite3_column_double(stmt, 15);
+            doc["swayRms"] = sqlite3_column_double(stmt, 16);
+            doc["mlRms"] = sqlite3_column_double(stmt, 17);
+            doc["apRms"] = sqlite3_column_double(stmt, 18);
+            doc["stabilityPct"] = sqlite3_column_double(stmt, 19);
+            doc["qFL"] = sqlite3_column_double(stmt, 20);
+            doc["qFR"] = sqlite3_column_double(stmt, 21);
+            doc["qBL"] = sqlite3_column_double(stmt, 22);
+            doc["qBR"] = sqlite3_column_double(stmt, 23);
+        }
     }
     xSemaphoreGive(dbMutex);
     return rc;
@@ -287,7 +474,7 @@ bool DatabaseManager::deletePatient(String patientId) {
     
     const char* sql = "DELETE FROM sessions WHERE patient_id = ?;";
     xSemaphoreTake(dbMutex, portMAX_DELAY);
-    sqlite3_stmt* stmt;
+    sqlite3_stmt* stmt = nullptr;
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         Serial.printf("[DatabaseManager] Failed to prepare deletePatient statement: %s\n", sqlite3_errmsg(db));
@@ -306,6 +493,7 @@ bool DatabaseManager::deletePatient(String patientId) {
     
     sqlite3_finalize(stmt);
     xSemaphoreGive(dbMutex);
+    if (success) refreshStorageStats();
     return success;
 }
 
@@ -317,6 +505,7 @@ bool DatabaseManager::deleteSession(int id) {
     xSemaphoreTake(dbMutex, portMAX_DELAY);
     bool result = execQuery(sql);
     xSemaphoreGive(dbMutex);
+    if (result) refreshStorageStats();
     return result;
 }
 

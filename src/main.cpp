@@ -32,9 +32,9 @@ void dbTask(void *pvParameters) {
     }
 }
 
-// No global cache needed anymore (hardware clock sync)
-
 void sensorTask(void *pvParameters) {
+    uint32_t queueDropCounter = 0;
+    unsigned long lastDropLogMs = 0;
     while (true) {
 #if MPU_USE_INTERRUPT
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -47,8 +47,15 @@ void sensorTask(void *pvParameters) {
         if (sensor.isReady()) {
             MPUData data = sensor.getData();
             if (data.dataUpdated) {
-                // Send to queue, don't block if full
-                xQueueSend(mpuDataQueue, &data, 0);
+                // Send to queue, don't block if full; rate-log drops under pressure
+                if (xQueueSend(mpuDataQueue, &data, 0) != pdTRUE) {
+                    queueDropCounter++;
+                    unsigned long nowMs = millis();
+                    if (nowMs - lastDropLogMs >= 5000) {
+                        Serial.printf("[SensorTask] WARNING: mpuDataQueue full! Dropped %u samples.\n", queueDropCounter);
+                        lastDropLogMs = nowMs;
+                    }
+                }
             }
         }
     }
@@ -62,11 +69,10 @@ void setup() {
     delay(500);
 
     Serial.println("====================================================================");
-    Serial.println("  RehabDevice — Wrist Rehabilitation Monitoring System (ESP32)");
+    Serial.println("  RehabDevice — Rehabilitation Monitoring System (ESP32)");
     Serial.println("====================================================================");
 
-    // 1. SD card removed.
-    // 1.5 Initialize LittleFS for web UI
+    // 1. Initialize LittleFS for web UI and local fallback SQLite storage
     if (!LittleFS.begin()) {
         Serial.println("[Setup] Error: Failed to mount LittleFS! Attempting to format...");
         if (LittleFS.begin(true)) {
@@ -117,7 +123,7 @@ void setup() {
     xTaskCreatePinnedToCore(
         dbTask,           // Task function
         "DBTask",         // Task name
-        4096,             // Stack size
+        8192,             // Expanded 8 KB stack for 23-column SQLite VDBE + SessionRecord
         NULL,             // Parameters
         2,                // Priority (lower than sensor)
         &dbTaskHandle,    // Task handle
@@ -134,15 +140,49 @@ void loop() {
     SysCommandMsg msg;
     while (xQueueReceive(sysCommandQueue, &msg, 0) == pdTRUE) {
         if (msg.cmd == CMD_START_SESSION) {
-            analytics.startSession(String(msg.patientId));
+            dbManager.refreshStorageStats();
+            if (dbManager.isStorageLowSpace()) {
+                Serial.println("[Main] Blocked CMD_START_SESSION: LittleFS free space < 100 KiB without SD card.");
+                webServer.broadcastStatus();
+                continue;
+            }
+            if (msg.hasOrientation) {
+                analytics.setOrientation(
+                    (msg.orientationFlags & ORIENT_FLAG_INVERT_X) != 0,
+                    (msg.orientationFlags & ORIENT_FLAG_INVERT_Y) != 0,
+                    (msg.orientationFlags & ORIENT_FLAG_SWAP_AXES) != 0
+                );
+            }
+            if (msg.hasTare) {
+                analytics.setTare(msg.tareRoll, msg.tarePitch);
+            }
+            analytics.startSession(String(msg.patientId), msg.sessionMode);
             webServer.broadcastStatus();
         } else if (msg.cmd == CMD_STOP_SESSION) {
-            SessionRecord rec = analytics.getCurrentRecord();
-            analytics.stopSession();
-            dbManager.saveSession(rec); // Non-blocking push to dbQueue
+            if (analytics.isSessionActive()) {
+                SessionRecord rec = analytics.getCurrentRecord();
+                analytics.stopSession();
+                dbManager.saveSession(rec); // Non-blocking push to dbQueue
+            }
             webServer.broadcastStatus();
         } else if (msg.cmd == CMD_RECALIBRATE) {
             sensor.recalibrate();
+            analytics.resetTare();
+        } else if (msg.cmd == CMD_SYNC_ORIENTATION) {
+            if (msg.hasOrientation) {
+                analytics.setOrientation(
+                    (msg.orientationFlags & ORIENT_FLAG_INVERT_X) != 0,
+                    (msg.orientationFlags & ORIENT_FLAG_INVERT_Y) != 0,
+                    (msg.orientationFlags & ORIENT_FLAG_SWAP_AXES) != 0
+                );
+            }
+            if (msg.hasTare) {
+                analytics.setTare(msg.tareRoll, msg.tarePitch);
+            }
+        } else if (msg.cmd == CMD_SET_TARE) {
+            if (msg.hasTare) {
+                analytics.setTare(msg.tareRoll, msg.tarePitch);
+            }
         } else if (msg.cmd == CMD_DELETE_PATIENT) {
             dbManager.deletePatient(String(msg.patientId));
             webServer.broadcastStatus();
@@ -161,7 +201,7 @@ void loop() {
     static uint32_t packetCounter = 0;
     
     while (xQueueReceive(mpuDataQueue, &data, 0) == pdTRUE) {
-        // Pass every packet to analytics engine for accurate tremor and flexion detection
+        // Pass every packet to analytics engine for accurate biomechanical tracking
         analytics.processData(data);
         
         packetCounter++;
